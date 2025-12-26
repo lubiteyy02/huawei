@@ -1,6 +1,20 @@
 {
   "app": {
-    "signingConfigs": [],
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:/Users/47346/.ohos/config/default_huawei_cRMNfHXY-rs26j-q-zNVGBldn0KXM7M0d9PwOBtHi6g=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001B30D44C2459B9363E29CEE02ED3C48E620F21CC34C84A86B43CB569DF406FCAE84BE0762B786EBF",
+          "profile": "C:/Users/47346/.ohos/config/default_huawei_cRMNfHXY-rs26j-q-zNVGBldn0KXM7M0d9PwOBtHi6g=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:/Users/47346/.ohos/config/default_huawei_cRMNfHXY-rs26j-q-zNVGBldn0KXM7M0d9PwOBtHi6g=.p12",
+          "storePassword": "0000001BDF41925EA305DD62AD1377391BF6CA77B818A3F220DB2DBC195B6F860A9A357CF42DC8FA4A8C97"
+        }
+      }
+    ],
     "products": [
       {
         "name": "default",
