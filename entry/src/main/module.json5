@@ -5,7 +5,9 @@
     "description": "$string:module_desc",
     "mainElement": "EntryAbility",
     "deviceTypes": [
-      "phone"
+      "phone",
+      "tablet",
+      "2in1"
     ],
     "deliveryWithInstall": true,
     "installationFree": false,
@@ -15,9 +17,9 @@
         "name": "EntryAbility",
         "srcEntry": "./ets/entryability/EntryAbility.ets",
         "description": "$string:EntryAbility_desc",
-        "icon": "$media:layered_image",
+        "icon": "$media:app_icon",
         "label": "$string:EntryAbility_label",
-        "startWindowIcon": "$media:startIcon",
+        "startWindowIcon": "$media:app_icon",
         "startWindowBackground": "$color:start_window_background",
         "exported": true,
         "skills": [
@@ -26,24 +28,57 @@
               "entity.system.home"
             ],
             "actions": [
-              "ohos.want.action.home"
+              "action.system.home"
             ]
           }
         ]
       }
     ],
-    "extensionAbilities": [
+
+    // ============================================================
+    // 关键配置 1：Metadata (配置 Client ID)
+    // 必须替换 value 里的内容，否则地图黑屏
+    // ============================================================
+    "metadata": [
       {
-        "name": "EntryBackupAbility",
-        "srcEntry": "./ets/entrybackupability/EntryBackupAbility.ets",
-        "type": "backup",
-        "exported": false,
-        "metadata": [
-          {
-            "name": "ohos.extension.backup",
-            "resource": "$profile:backup_config"
-          }
-        ],
+        "name": "client_id",
+        "value": "你的Client_ID_粘贴在这里"
+      }
+    ],
+
+    // ============================================================
+    // 关键配置 2：权限声明 (地图、定位、网络)
+    // ============================================================
+    "requestPermissions": [
+      {
+        "name": "ohos.permission.INTERNET",
+        "reason": "$string:module_desc",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "inuse"
+        }
+      },
+      {
+        "name": "ohos.permission.LOCATION",
+        "reason": "$string:module_desc",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "inuse"
+        }
+      },
+      {
+        "name": "ohos.permission.APPROXIMATELY_LOCATION",
+        "reason": "$string:module_desc",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "inuse"
+        }
       }
     ]
   }
