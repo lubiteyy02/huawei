@@ -7,8 +7,6 @@ export struct NavigationModule {
   @State isMapLoaded: boolean = false;
   @State isNightMode: boolean = true;
   @State hasLocationPermission: boolean = false;
-
-  // 实时定位数据
   @State latitude: number = 39.9042;
   @State longitude: number = 116.4074;
   @State altitude: number = 0;
@@ -16,197 +14,142 @@ export struct NavigationModule {
   @State accuracy: number = 0;
   @State userHeading: number = 0;
   @State addressText: string = "等待GPS信号...";
-
+  @State zoomLevel: number = 15;
   private mapController: map.MapComponentController | null = null;
+  private locationCallback: (location: geoLocationManager.Location) => void = (location) => { this.updateLocationState(location); };
 
-  private locationCallback: (location: geoLocationManager.Location) => void = (location: geoLocationManager.Location): void => {
-    this.updateLocationState(location);
-  };
+  aboutToAppear() { this.reqPermissionsFromUser(); }
+  aboutToDisappear() { try { geoLocationManager.off('locationChange', this.locationCallback); } catch (err) {} }
 
-  aboutToAppear(): void {
-    this.reqPermissionsFromUser();
-  }
-
-  aboutToDisappear(): void {
-    try {
-      geoLocationManager.off('locationChange', this.locationCallback);
-    } catch (err) {
-      console.error("Stop location listener failed:", err);
-    }
-  }
-
-  async reqPermissionsFromUser(): Promise<void> {
+  async reqPermissionsFromUser() {
     let atManager = abilityAccessCtrl.createAtManager();
     try {
-      const permissions: Array<Permissions> = ['ohos.permission.LOCATION', 'ohos.permission.APPROXIMATELY_LOCATION'];
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      const data = await atManager.requestPermissionsFromUser(context, permissions);
-      if (data.authResults.length > 0 && data.authResults[0] === 0) {
+      const data = await atManager.requestPermissionsFromUser(context, ['ohos.permission.LOCATION', 'ohos.permission.APPROXIMATELY_LOCATION']);
+      if (data.authResults[0] === 0) {
         this.hasLocationPermission = true;
-        if (this.mapController) {
-          this.startRealLocation();
-        }
+        if (this.mapController) this.startRealLocation();
       }
-    } catch (err) {
-      console.error("Permission request failed:", err);
-    }
+    } catch (err) {}
   }
 
-  async startRealLocation(): Promise<void> {
+  async startRealLocation() {
     if (!this.mapController || !this.hasLocationPermission) return;
-
     try {
       this.mapController.setMyLocationEnabled(true);
-      // 开启自带缩放控件
       this.mapController.setZoomControlsEnabled(true);
       this.mapController.setMyLocationControlsEnabled(true);
-
-      let requestInfo: geoLocationManager.LocationRequest = {
-        'priority': geoLocationManager.LocationRequestPriority.ACCURACY,
-        'scenario': geoLocationManager.LocationRequestScenario.NAVIGATION,
-        'timeInterval': 1,
-        'distanceInterval': 0,
-        'maxAccuracy': 0
-      };
-
-      geoLocationManager.on('locationChange', requestInfo, this.locationCallback);
-      this.addressText = "正在获取卫星信号...";
-
-    } catch (err) {
-      console.error("Start real location failed:", err);
-      this.addressText = "定位服务异常";
-    }
+      let req: geoLocationManager.LocationRequest = { priority: 0x203, scenario: 0x301, timeInterval: 1, distanceInterval: 0, maxAccuracy: 0 };
+      geoLocationManager.on('locationChange', req, this.locationCallback);
+      this.addressText = "定位中...";
+    } catch (err) {}
   }
 
-  updateLocationState(location: geoLocationManager.Location): void {
+  updateLocationState(location: geoLocationManager.Location) {
     this.latitude = location.latitude;
     this.longitude = location.longitude;
-    this.altitude = location.altitude;
     this.speed = location.speed;
-    this.accuracy = location.accuracy;
     this.userHeading = location.direction;
-    this.addressText = "实时巡航模式";
-
-    if (this.mapController) {
-      try {
-        let cameraUpdate: map.CameraUpdate = map.newCameraPosition({
-          target: {
-            latitude: this.latitude,
-            longitude: this.longitude
-          },
-          zoom: 18,
-          tilt: 45,
-          bearing: this.userHeading
-        });
-        this.mapController.animateCamera(cameraUpdate);
-      } catch (e) {}
-    }
+    this.addressText = "实时巡航";
   }
 
-  onMapLoad(controller: map.MapComponentController): void {
+  onMapLoad(controller: map.MapComponentController) {
     this.mapController = controller;
     this.isMapLoaded = true;
-
-    // 关键：设置底部 Padding，把 Logo 和 缩放按钮 顶上去，避开底部仪表盘
     try {
-      this.mapController.setPadding({ top: 0, left: 0, right: 0, bottom: 250 });
-    } catch(e) {
-      console.error("Set padding failed:", e);
-    }
-
-    if (this.hasLocationPermission) {
-      this.startRealLocation();
-    }
+      // 底部留出 150vp 的 Padding，让 MapKit 自带的 Logo 和 Zoom 按钮上移
+      // 这样自带的缩放按钮就会跑到信息面板上方，不会被挡住
+      this.mapController.setPadding({ top: 0, left: 0, right: 0, bottom: 150 });
+    } catch(e) {}
+    if (this.hasLocationPermission) this.startRealLocation();
     this.updateMapStyle();
   }
 
-  updateMapStyle(): void {
+  updateMapStyle() {
     if (!this.mapController) return;
+    try { this.mapController.setDayNightMode(this.isNightMode ? mapCommon.DayNightMode.NIGHT : mapCommon.DayNightMode.DAY); } catch (e) {}
+  }
+
+  // 手动缩放
+  changeZoom(delta: number): void {
+    if (!this.mapController) return;
+    this.zoomLevel = Math.max(3, Math.min(20, this.zoomLevel + delta));
     try {
-      this.mapController.setDayNightMode(
-        this.isNightMode ? mapCommon.DayNightMode.NIGHT : mapCommon.DayNightMode.DAY
-      );
-    } catch (e) {}
+      let cameraUpdate = map.newCameraPosition({
+        target: { latitude: this.latitude, longitude: this.longitude },
+        zoom: this.zoomLevel, tilt: 45, bearing: this.userHeading
+      });
+      this.mapController.animateCamera(cameraUpdate);
+    } catch(e) {}
   }
 
   build() {
-    Stack({ alignContent: Alignment.BottomEnd }) {
-      // 1. 地图
+    Stack({ alignContent: Alignment.Bottom }) { // 对齐到底部中间
+
+      // 1. 地图层 (全屏)
       Stack() {
         MapComponent({
-          mapOptions: {
-            position: { target: { latitude: 39.9, longitude: 116.4 }, zoom: 15 },
-            mapType: mapCommon.MapType.STANDARD
-          },
-          mapCallback: (err, controller) => {
-            if (!err && controller) {
-              this.onMapLoad(controller);
-            }
-          }
+          mapOptions: { position: { target: { latitude: 39.9, longitude: 116.4 }, zoom: 15 }, mapType: mapCommon.MapType.STANDARD },
+          mapCallback: (err, controller) => { if (!err && controller) this.onMapLoad(controller); }
         })
           .width('100%').height('100%')
       }
-      .width('100%').height('100%')
 
-      // 2. 自定义控制按钮 (夜间模式)
+      // 2. 右侧控制按钮 (靠右，避开左边)
       Column({ space: 15 }) {
-        Button(this.isNightMode ? "☀️" : "🌙")
-          .type(ButtonType.Circle)
-          .width(50).height(50)
-          .fontSize(20)
-          .fontColor(Color.White)
-          .backgroundColor('rgba(30, 41, 59, 0.9)')
-          .shadow({ radius: 10, color: 'rgba(0,0,0,0.3)' })
-          .border({ width: 1, color: 'rgba(255,255,255,0.1)' })
-          .onClick(() => {
-            this.isNightMode = !this.isNightMode;
-            this.updateMapStyle();
-          })
+        this.MapBtn(this.isNightMode ? "☀️" : "🌙", () => {
+          this.isNightMode = !this.isNightMode;
+          this.updateMapStyle();
+        })
+        this.MapBtn("＋", () => this.changeZoom(1))
+        this.MapBtn("－", () => this.changeZoom(-1))
+        this.MapBtn("◎", () => {
+          if(this.hasLocationPermission && this.mapController) {
+            try {
+              this.mapController.animateCamera(map.newCameraPosition({
+                target: { latitude: this.latitude, longitude: this.longitude },
+                zoom: this.zoomLevel, tilt: 45, bearing: this.userHeading
+              }));
+            } catch(e) {}
+          }
+        })
       }
-      .width(60)
-      .alignItems(HorizontalAlign.Center)
-      .position({ x: 20, y: 60 })
+      .alignItems(HorizontalAlign.End)
+      .position({ x: '100%', y: '40%' }) // 放在右侧中间
+      .markAnchor({ x: '100%', y: '50%' })
+      .padding({ right: 20 })
 
-      // 3. 底部仪表盘
-      Column() {
-        Row() {
-          Text((this.speed * 3.6).toFixed(0))
-            .fontSize(60)
-            .fontWeight(FontWeight.Bold)
-            .fontColor('#00E5FF')
-          Text("km/h")
-            .fontSize(16)
-            .fontColor('#00E5FF')
-            .margin({ top: 20, left: 5 })
-        }
+      // 3. 底部信息面板 (居中悬浮)
+      // 位于底部中间，左下角的菜单按钮在它左边，互不干扰
+      Row() {
+        Column() {
+          Text(`${(this.speed * 3.6).toFixed(0)}`).fontSize(32).fontWeight(FontWeight.Bold).fontColor('#00E5FF')
+          Text("km/h").fontSize(12).fontColor('rgba(255,255,255,0.6)')
+        }.margin({ right: 20 })
 
-        Divider().color('rgba(255,255,255,0.2)').margin({ top: 10, bottom: 10 })
+        Divider().vertical(true).height(30).color('rgba(255,255,255,0.2)')
 
         Column() {
-          this.DataRow("状态", this.addressText)
-          this.DataRow("纬度", this.latitude.toFixed(5))
-          this.DataRow("经度", this.longitude.toFixed(5))
-          this.DataRow("海拔", `${this.altitude.toFixed(1)} m`)
-          this.DataRow("航向", `${this.userHeading.toFixed(0)}°`)
-        }
-        .alignItems(HorizontalAlign.Start)
-        .width('100%')
+          Text(this.addressText).fontSize(16).fontColor(Color.White).fontWeight(FontWeight.Medium)
+          Text(`Lat: ${this.latitude.toFixed(4)}  Lng: ${this.longitude.toFixed(4)}`).fontSize(12).fontColor('rgba(255,255,255,0.6)').margin({ top: 4 })
+        }.alignItems(HorizontalAlign.Start).margin({ left: 20 })
       }
-      .width('70%')
-      .padding(20)
-      .margin({ bottom: 40, right: 20 }) // 适配隐藏式Dock
-      .borderRadius(24)
+      .padding({ left: 30, right: 30, top: 16, bottom: 16 })
       .backgroundColor('rgba(15, 23, 42, 0.9)')
-      .backdropBlur(20)
+      .backdropBlur(30)
+      .borderRadius(24)
       .border({ width: 1, color: 'rgba(255,255,255,0.1)' })
       .shadow({ radius: 30, color: 'rgba(0,0,0,0.5)', offsetY: 10 })
+      .margin({ bottom: 40 }) // 底部留空
     }
   }
 
-  @Builder DataRow(label: string, value: string): void {
-    Row() {
-      Text(label).fontSize(14).fontColor('#94A3B8').width(50)
-      Text(value).fontSize(14).fontColor(Color.White).fontWeight(FontWeight.Medium)
-    }.margin({ top: 4 })
+  @Builder MapBtn(text: string, action: () => void) {
+    Button(text)
+      .type(ButtonType.Circle).width(50).height(50)
+      .fontSize(20).fontColor(Color.White)
+      .backgroundColor('rgba(30, 41, 59, 0.9)')
+      .shadow({ radius: 10, color: 'rgba(0,0,0,0.3)' })
+      .onClick(action)
   }
 }

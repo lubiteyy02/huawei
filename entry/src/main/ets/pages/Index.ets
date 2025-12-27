@@ -8,7 +8,7 @@ import { common } from '@kit.AbilityKit'
 @Component
 struct Index {
   @State currentIndex: number = 0
-  @State isDockShow: boolean = false // 控制 Dock 是否展开
+  @State isExpanded: boolean = false // 控制侧边栏展开
   private controller: TabsController = new TabsController()
 
   aboutToAppear() {
@@ -16,15 +16,13 @@ struct Index {
       let context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       let windowClass = context.windowStage.getMainWindowSync();
       windowClass.setWindowLayoutFullScreen(true);
-    } catch (err) {
-      console.error("Set full screen failed:", err);
-    }
+    } catch (err) {}
   }
 
   build() {
-    Stack({ alignContent: Alignment.BottomStart }) { // 对齐方式左下角
+    Stack({ alignContent: Alignment.BottomStart }) {
 
-      // 1. 内容层 (全屏铺满)
+      // 1. 内容层 (全屏铺满，不留左侧空白)
       Tabs({ barPosition: BarPosition.End, controller: this.controller }) {
         TabContent() { CarStatusModule() }
         TabContent() { NavigationModule() }
@@ -37,101 +35,69 @@ struct Index {
       .width('100%')
       .height('100%')
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-      // 点击内容区域时，如果 Dock 打开着，就顺手关掉它
       .onClick(() => {
-        if (this.isDockShow) {
-          this.getUIContext().animateTo({ duration: 300, curve: Curve.EaseOut }, () => {
-            this.isDockShow = false;
+        // 点击内容区自动收起菜单
+        if (this.isExpanded) {
+          this.getUIContext().animateTo({ duration: 300, curve: Curve.FastOutSlowIn }, () => {
+            this.isExpanded = false;
           })
         }
       })
 
-      // 2. 悬浮 Dock 栏
-      Row() {
-        this.DockItem("车辆状态", 0, "⚡️")
-        this.DockItem("智能导航", 1, "🧭")
-        this.DockItem("媒体娱乐", 2, "🎵")
-        this.DockItem("超级协同", 3, "📱")
-      }
-      .width('80%')
-      .height(80)
-      .backgroundColor('rgba(15, 23, 42, 0.95)')
-      .backdropBlur(50)
-      .borderRadius(40)
-      .border({ width: 1, color: 'rgba(255,255,255,0.15)' })
-      .shadow({ radius: 30, color: 'rgba(0,0,0,0.6)', offsetY: 10 })
-      .justifyContent(FlexAlign.SpaceEvenly)
-      // 位置控制：显示时距离底部30，隐藏时往下沉150
-      .position({ x: '10%', y: this.isDockShow ? '85%' : '100%' })
-      .translate({ y: this.isDockShow ? -30 : 150 })
-      .opacity(this.isDockShow ? 1 : 0)
-      .zIndex(999)
-      .animation({ duration: 400, curve: Curve.FastOutSlowIn })
-
-      // 3. 系统菜单/Home 按钮 (永远悬浮在左下角)
-      Button() {
-        // 图标：如果是展开状态显示 "X"，收起状态显示 "菜单"
-        Text(this.isDockShow ? "✕" : ":::")
-          .fontSize(24)
-          .fontColor(Color.White)
-          .fontWeight(FontWeight.Bold)
-          .animation({ duration: 200 })
-      }
-      .width(56)
-      .height(56)
-      .borderRadius(28)
-      .backgroundColor(this.isDockShow ? '#FF5E57' : 'rgba(30, 41, 59, 0.9)')
-      .shadow({ radius: 10, color: 'rgba(0,0,0,0.4)' })
-      .border({ width: 1, color: 'rgba(255,255,255,0.2)' })
-      .margin({ left: 20, bottom: 40 })
-      .onClick(() => {
-        // 切换 Dock 显示状态
-        this.getUIContext().animateTo({ duration: 300, curve: Curve.EaseOut }, () => {
-          this.isDockShow = !this.isDockShow;
-        })
-      })
-      .zIndex(1000)
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor('#000000')
-  }
-
-  @Builder DockItem(title: string, index: number, icon: string) {
-    Column() {
-      Stack() {
-        if (this.currentIndex === index) {
-          Circle({ width: 44, height: 44 })
-            .fill(this.getThemeColor(index)).opacity(0.15).blur(10)
+      // 2. 灵动侧边栏 (悬浮在左下角)
+      Column() {
+        if (this.isExpanded) {
+          Column({ space: 20 }) {
+            this.MenuItem(0, "⚡️", "车况")
+            this.MenuItem(1, "🧭", "导航")
+            this.MenuItem(2, "🎵", "媒体")
+            this.MenuItem(3, "📱", "互联")
+          }
+          .margin({ bottom: 20 })
+          .transition({ type: TransitionType.Insert, opacity: 0, translate: { y: 20 } })
+          .transition({ type: TransitionType.Delete, opacity: 0, translate: { y: 20 } })
         }
-        Text(icon).fontSize(28)
-          .scale(this.currentIndex === index ? { x: 1.1, y: 1.1 } : { x: 1, y: 1 })
-      }.width(50).height(44).alignContent(Alignment.Center)
 
-      Text(title).fontSize(10)
-        .fontColor(this.currentIndex === index ? Color.White : 'rgba(255,255,255,0.5)')
-        .margin({ top: 2 })
+        // 触发按钮
+        Button() {
+          Text(this.isExpanded ? "✕" : ":::")
+            .fontSize(24).fontColor(Color.White).fontWeight(FontWeight.Bold)
+        }
+        .width(56).height(56).borderRadius(28)
+        .backgroundColor(this.isExpanded ? 'rgba(255, 255, 255, 0.2)' : 'transparent')
+        .onClick(() => {
+          this.getUIContext().animateTo({ duration: 350, curve: Curve.FastOutSlowIn }, () => {
+            this.isExpanded = !this.isExpanded;
+          })
+        })
+      }
+      .width(72)
+      .padding({ top: 10, bottom: 8 })
+      .backgroundColor('rgba(15, 23, 42, 0.9)')
+      .backdropBlur(60)
+      .borderRadius(40)
+      .border({ width: 1, color: 'rgba(255,255,255,0.1)' })
+      .shadow({ radius: 30, color: 'rgba(0,0,0,0.5)', offsetX: 10, offsetY: 10 })
+      .margin({ left: 24, bottom: 40 }) // 固定位置
+      .clip(true)
+      .zIndex(999)
     }
-    .height('100%').justifyContent(FlexAlign.Center).width(70)
-    .onClick(() => {
-      // 1. 更新 UI 选中态
-      this.currentIndex = index
-      // 2. 真正切换 Tabs 页面 (之前漏掉了这行)
-      this.controller.changeIndex(index)
-      // 3. 切换后收起 Dock
-      this.getUIContext().animateTo({ duration: 300 }, () => {
-        this.isDockShow = false;
-      })
-    })
+    .width('100%').height('100%').backgroundColor('#000000')
   }
 
-  getThemeColor(index: number): string {
-    switch (index) {
-      case 0: return '#00FFA3';
-      case 1: return '#00E5FF';
-      case 2: return '#FF0080';
-      case 3: return '#FFD700';
-      default: return '#FFFFFF';
+  @Builder MenuItem(index: number, icon: string, label: string) {
+    Column() {
+      if (this.currentIndex === index) {
+        Circle({ width: 6, height: 6 }).fill('#00E5FF').margin({ bottom: 4 })
+      }
+      Button() { Text(icon).fontSize(26) }
+      .width(50).height(50).type(ButtonType.Circle)
+      .backgroundColor(this.currentIndex === index ? 'rgba(0, 229, 255, 0.15)' : 'transparent')
+      .onClick(() => {
+        this.currentIndex = index;
+        this.controller.changeIndex(index);
+      })
+      Text(label).fontSize(10).fontColor(this.currentIndex === index ? '#00E5FF' : 'rgba(255,255,255,0.5)').margin({ top: -2 })
     }
   }
 }

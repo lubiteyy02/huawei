@@ -1,14 +1,16 @@
 @Component
 export struct CollaborationModule {
-  @State messages: string[] = ["手机导航: 目的地已同步", "音乐接续: 正在播放《七里香》"];
+  @State messages: string[] = ["导航流转: 目的地已同步", "音乐接续: 正在播放《七里香》"];
 
   build() {
     Column() {
-      // 标题头
+      // 顶部标题
       Row() {
-        Rect().width(16).height(26).borderRadius(3).stroke('#007DFF').strokeWidth(2).fill('transparent')
-        Text(" Super Device Link").fontSize(22).fontWeight(FontWeight.Bold).fontColor(Color.White).margin({ left: 10 })
-      }.width('100%').padding(30)
+        Image($r('app.media.app_icon')).width(40).height(40).margin({ right: 15 })
+        Text("超级终端互联").fontSize(24).fontWeight(FontWeight.Bold).fontColor(Color.White)
+      }
+      .width('100%')
+      .padding({ top: 60, left: 30 })
 
       // 消息列表
       List({ space: 15 }) {
@@ -27,20 +29,23 @@ export struct CollaborationModule {
         })
       }
       .width('90%')
-      .layoutWeight(1) // 占满中间空间
+      .layoutWeight(1) // 占满中间
+      .margin({ top: 30 })
 
-      // 底部操作区
-      Button("从手机同步数据")
-        .width('90%').height(56)
+      // 底部按钮 (居中，并抬高)
+      Button("立即同步数据")
+        .width('80%').height(56)
         .fontSize(18)
         .backgroundColor('#007DFF')
         .shadow({ radius: 20, color: 'rgba(0, 125, 255, 0.4)' })
         .onClick(() => {
-          this.messages.push(`新消息 ${new Date().toLocaleTimeString()}`)
+          this.messages.push(`数据同步 ${new Date().toLocaleTimeString()}`);
         })
-        .margin({ bottom: 40 }) // 适配隐藏式Dock
+        // 核心避让：抬高 100vp，左下角安全
+        .margin({ bottom: 100 })
     }
-    .width('100%').height('100%')
+    .width('100%')
+    .height('100%')
     .backgroundColor('#0F172A')
   }
 }
