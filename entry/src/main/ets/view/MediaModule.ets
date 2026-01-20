@@ -26,14 +26,81 @@ export struct MediaModule {
   ];
 
   aboutToAppear(): void { this.safeInit(); }
-  async safeInit(): Promise<void> { try { this.currentSong = this.songList[0]; await this.initSession(); await this.initPlayer(); this.startSpectrumAnim(); } catch (e) {} }
-  aboutToDisappear(): void { this.releasePlayer(); if(this.session) this.session.destroy(); clearInterval(this.timer); }
 
-  async initSession(): Promise<void> { try { let context = this.getUIContext().getHostContext() as common.UIAbilityContext; this.session = await avSession.createAVSession(context, 'CarInfotainmentSession', 'audio'); await this.session.activate(); } catch(e){} }
-  async updateSessionMetadata(song: Song): Promise<void> { if(!this.session) return; try{ await this.session.setAVMetadata({assetId: song.id.toString(), title: song.title, artist: song.artist, mediaImage: song.cover, duration: this.totalTime}); }catch(e){} }
-  async updateSessionPlaybackState(state: avSession.PlaybackState, time: number): Promise<void> { if(!this.session) return; try{ await this.session.setAVPlaybackState({state: state, position:{elapsedTime:time, updateTime:new Date().getTime()}, speed:1.0, bufferedTime:this.totalTime, loopMode: avSession.LoopMode.LOOP_MODE_LIST, isFavorite:false}); }catch(e){} }
+  async safeInit(): Promise<void> {
+    try {
+      this.currentSong = this.songList[0];
+      await this.initSession();
+      await this.initPlayer();
+      this.startSpectrumAnim();
+    } catch (e) {
+      console.error('Media Init Failed:', JSON.stringify(e));
+    }
+  }
 
-  async initPlayer(): Promise<void> { try { this.avPlayer = await media.createAVPlayer(); this.avPlayer.audioRendererInfo = {usage: audio.StreamUsage.STREAM_USAGE_MUSIC, rendererFlags: 0}; this.setAVPlayerCallback(); if(this.currentSong) this.avPlayer.url = this.currentSong.url; } catch(e){} }
+  aboutToDisappear(): void {
+    this.releasePlayer();
+    if(this.session) {
+      // 销毁session也需要try-catch，防止退出时崩溃
+      try { this.session.destroy(); } catch(e) {}
+    }
+    clearInterval(this.timer);
+  }
+
+  // ✅ 修复：增强异常捕获，消除编译器警告
+  async initSession(): Promise<void> {
+    try {
+      let context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      this.session = await avSession.createAVSession(context, 'CarInfotainmentSession', 'audio');
+      await this.session.activate();
+    } catch(e) {
+      console.error('AVSession Init Error:', JSON.stringify(e));
+    }
+  }
+
+  async updateSessionMetadata(song: Song): Promise<void> {
+    if(!this.session) return;
+    try{
+      await this.session.setAVMetadata({
+        assetId: song.id.toString(),
+        title: song.title,
+        artist: song.artist,
+        mediaImage: song.cover,
+        duration: this.totalTime
+      });
+    } catch(e) {
+      console.error('Metadata Update Error:', e);
+    }
+  }
+
+  async updateSessionPlaybackState(state: avSession.PlaybackState, time: number): Promise<void> {
+    if(!this.session) return;
+    try{
+      await this.session.setAVPlaybackState({
+        state: state,
+        position: {
+          elapsedTime: time,
+          updateTime: new Date().getTime()
+        },
+        speed: 1.0,
+        bufferedTime: this.totalTime,
+        loopMode: avSession.LoopMode.LOOP_MODE_LIST,
+        isFavorite: false
+      });
+    } catch(e) {}
+  }
+
+  async initPlayer(): Promise<void> {
+    try {
+      this.avPlayer = await media.createAVPlayer();
+      this.avPlayer.audioRendererInfo = {usage: audio.StreamUsage.STREAM_USAGE_MUSIC, rendererFlags: 0};
+      this.setAVPlayerCallback();
+      if(this.currentSong) this.avPlayer.url = this.currentSong.url;
+    } catch(e) {
+      console.error('AVPlayer Init Error:', e);
+    }
+  }
+
   releasePlayer(): void { try { if(this.avPlayer) this.avPlayer.release(); } catch(e){} }
 
   setAVPlayerCallback(): void {
@@ -41,19 +108,53 @@ export struct MediaModule {
     this.avPlayer.on('stateChange', async (state: media.AVPlayerState) => {
       switch(state) {
         case 'initialized': try{ await this.avPlayer!.prepare(); }catch(e){} break;
-        case 'prepared': this.totalTime = this.avPlayer!.duration; if(this.currentSong) this.updateSessionMetadata(this.currentSong); if(this.isPlaying) try{this.avPlayer!.play();}catch(e){} break;
-        case 'playing': this.isPlaying = true; this.startRotateAnim(); this.updateSessionPlaybackState(avSession.PlaybackState.PLAYBACK_STATE_PLAY, this.currentTime); break;
-        case 'paused': this.isPlaying = false; this.stopRotateAnim(); this.updateSessionPlaybackState(avSession.PlaybackState.PLAYBACK_STATE_PAUSE, this.currentTime); break;
+        case 'prepared':
+          this.totalTime = this.avPlayer!.duration;
+          if(this.currentSong) this.updateSessionMetadata(this.currentSong);
+          if(this.isPlaying) try{this.avPlayer!.play();}catch(e){}
+          break;
+        case 'playing':
+          this.isPlaying = true;
+          this.startRotateAnim();
+          this.updateSessionPlaybackState(avSession.PlaybackState.PLAYBACK_STATE_PLAY, this.currentTime);
+          break;
+        case 'paused':
+          this.isPlaying = false;
+          this.stopRotateAnim();
+          this.updateSessionPlaybackState(avSession.PlaybackState.PLAYBACK_STATE_PAUSE, this.currentTime);
+          break;
         case 'completed': this.playNext(); break;
       }
     });
     this.avPlayer.on('timeUpdate', (time) => this.currentTime = time);
   }
 
-  async playSong(song: Song): Promise<void> { if(!this.avPlayer) return; if(this.currentSong?.id === song.id) { this.togglePlay(); return; } this.currentSong = song; this.isPlaying = true; this.rotateAngle = 0; try{ await this.avPlayer.reset(); this.avPlayer.url = song.url; }catch(e){} }
-  async togglePlay(): Promise<void> { if(!this.avPlayer) return; try{ if(this.isPlaying) await this.avPlayer.pause(); else await this.avPlayer.play(); }catch(e){} }
-  playNext(): void { if(!this.currentSong) return; let idx = this.songList.findIndex(i=>i.id===this.currentSong?.id); this.playSong(this.songList[(idx+1)%this.songList.length]); }
-  playPrev(): void { if(!this.currentSong) return; let idx = this.songList.findIndex(i=>i.id===this.currentSong?.id); this.playSong(this.songList[idx===0?this.songList.length-1:idx-1]); }
+  async playSong(song: Song): Promise<void> {
+    if(!this.avPlayer) return;
+    if(this.currentSong?.id === song.id) { this.togglePlay(); return; }
+    this.currentSong = song;
+    this.isPlaying = true;
+    this.rotateAngle = 0;
+    try{ await this.avPlayer.reset(); this.avPlayer.url = song.url; }catch(e){}
+  }
+
+  async togglePlay(): Promise<void> {
+    if(!this.avPlayer) return;
+    try{ if(this.isPlaying) await this.avPlayer.pause(); else await this.avPlayer.play(); }catch(e){}
+  }
+
+  playNext(): void {
+    if(!this.currentSong) return;
+    let idx = this.songList.findIndex(i=>i.id===this.currentSong?.id);
+    this.playSong(this.songList[(idx+1)%this.songList.length]);
+  }
+
+  playPrev(): void {
+    if(!this.currentSong) return;
+    let idx = this.songList.findIndex(i=>i.id===this.currentSong?.id);
+    this.playSong(this.songList[idx===0?this.songList.length-1:idx-1]);
+  }
+
   startRotateAnim(): void { clearInterval(this.timer); this.timer = setInterval(() => { this.rotateAngle = (this.rotateAngle+0.2)%360; }, 16); }
   stopRotateAnim(): void { clearInterval(this.timer); }
   startSpectrumAnim(): void {}
