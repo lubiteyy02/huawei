@@ -55,7 +55,8 @@ export struct CarStatusModule {
     .backgroundColor('#0B0F19')
   }
 
-  @Builder InfoCard(title: string, value: string, color: string | Color, progress: number) {
+  @Builder
+  InfoCard(title: string, value: string, color: string | Color, progress: number): void {
     Column() {
       Text(title).fontSize(14).fontColor('#94A3B8').margin({ bottom: 8 })
       Text(value).fontSize(24).fontWeight(FontWeight.Bold).fontColor(Color.White)

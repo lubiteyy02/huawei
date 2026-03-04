@@ -144,7 +144,8 @@ export struct NavigationModule {
     }
   }
 
-  @Builder MapBtn(text: string, action: () => void) {
+  @Builder
+  MapBtn(text: string, action: () => void): void {
     Button(text)
       .type(ButtonType.Circle).width(50).height(50)
       .fontSize(20).fontColor(Color.White)

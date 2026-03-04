@@ -1,4 +1,4 @@
-import { NavigationModule } from '../view/NavigationModule'
+import { EnhancedNavigationModule } from '../view/EnhancedNavigationModule'
 import { MediaModule } from '../view/MediaModule'
 import { CollaborationModule } from '../view/CollaborationModule'
 import { CarStatusModule } from '../view/CarStatusModule'
@@ -79,7 +79,7 @@ struct Index {
       // 1. 内容层
       Tabs({ barPosition: BarPosition.End, controller: this.controller }) {
         TabContent() { CarStatusModule() }.backgroundColor('#000000')
-        TabContent() { NavigationModule() }.backgroundColor('#000000')
+        TabContent() { EnhancedNavigationModule() }.backgroundColor('#000000')
         TabContent() { MediaModule({ isPageVisible: this.currentIndex === 2 }) }.backgroundColor('#000000')
         TabContent() { CollaborationModule() }.backgroundColor('#000000')
       }
@@ -108,7 +108,8 @@ struct Index {
   }
 
   // === 纯净磨砂子菜单 ===
-  @Builder PureGlassItem(item: ModuleConfig) {
+  @Builder
+  PureGlassItem(item: ModuleConfig): void {
     Column({ space: 4 }) {
       Stack({ alignContent: Alignment.Center }) {
         Text(item.icon)
@@ -152,7 +153,8 @@ struct Index {
   }
 
   // === 纯净主球 ===
-  @Builder PureMainBall() {
+  @Builder
+  PureMainBall(): void {
     Stack({ alignContent: Alignment.Center }) {
       Text("＋")
         .fontSize(26).fontColor('#FFFFFF').fontWeight(FontWeight.Lighter)

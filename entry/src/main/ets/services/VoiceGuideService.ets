@@ -44,10 +44,11 @@ export class VoiceGuideService {
     }
     
     try {
-      await this.ttsEngine.speak(text, {
-        volume: this.volume,
-        speed: 1.0,
-        pitch: 1.0
+      // speak方法需要2个参数：文本和回调
+      await this.ttsEngine.speak(text, (err) => {
+        if (err) {
+          console.error('Speak error:', err);
+        }
       });
     } catch (err) {
       console.error('Speak error:', err);

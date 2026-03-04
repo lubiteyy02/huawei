@@ -217,7 +217,8 @@ export struct MediaModule {
     .width('100%').height('100%')
   }
 
-  @Builder Btn(txt: string, size: number, cb: ()=>void) {
+  @Builder
+  Btn(txt: string, size: number, cb: ()=>void): void {
     Button(txt).type(ButtonType.Circle).width(60).height(60).fontSize(size).backgroundColor('rgba(255,255,255,0.05)').onClick(cb)
   }
 }

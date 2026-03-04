@@ -87,7 +87,7 @@ export class NavigationService {
       
     } catch (err) {
       console.error('Start navigation error:', err);
-      throw err;
+      throw new Error('导航启动失败');
     }
   }
   

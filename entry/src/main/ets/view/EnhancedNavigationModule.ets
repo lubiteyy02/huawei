@@ -300,7 +300,8 @@ export struct EnhancedNavigationModule {
   /**
    * 搜索栏
    */
-  @Builder SearchBar() {
+  @Builder
+  SearchBar(): void {
     Row() {
       TextInput({ placeholder: '搜索地点、地址', text: this.searchKeyword })
         .layoutWeight(1)
@@ -308,10 +309,10 @@ export struct EnhancedNavigationModule {
         .backgroundColor(Color.White)
         .borderRadius(24)
         .padding({ left: 20, right: 20 })
-        .onChange((value) => {
+        .onChange((value: string): void => {
           this.searchKeyword = value;
         })
-        .onSubmit(() => {
+        .onSubmit((): void => {
           this.showSearchPanel = true;
           this.searchPOI();
         })
@@ -321,7 +322,7 @@ export struct EnhancedNavigationModule {
         .backgroundColor('#00E5FF')
         .borderRadius(24)
         .margin({ left: 10 })
-        .onClick(() => {
+        .onClick((): void => {
           this.showSearchPanel = true;
           this.searchPOI();
         })
@@ -334,18 +335,19 @@ export struct EnhancedNavigationModule {
   /**
    * 控制按钮
    */
-  @Builder ControlButtons() {
+  @Builder
+  ControlButtons(): void {
     Column({ space: 15 }) {
-      this.MapBtn(this.isNightMode ? "☀️" : "🌙", () => {
+      this.MapBtn(this.isNightMode ? "☀️" : "🌙", (): void => {
         this.isNightMode = !this.isNightMode;
         this.updateMapStyle();
       })
-      this.MapBtn("＋", () => this.changeZoom(1))
-      this.MapBtn("－", () => this.changeZoom(-1))
-      this.MapBtn("◎", () => this.backToCurrentLocation())
+      this.MapBtn("＋", (): void => this.changeZoom(1))
+      this.MapBtn("－", (): void => this.changeZoom(-1))
+      this.MapBtn("◎", (): void => this.backToCurrentLocation())
       
       if (this.isNavigating) {
-        this.MapBtn("■", () => this.stopNavigation())
+        this.MapBtn("■", (): void => this.stopNavigation())
       }
     }
     .alignItems(HorizontalAlign.End)
@@ -357,7 +359,8 @@ export struct EnhancedNavigationModule {
   /**
    * 导航信息面板
    */
-  @Builder NavigationPanel() {
+  @Builder
+  NavigationPanel(): void {
     Column({ space: 12 }) {
       // 剩余信息
       Row() {
@@ -412,7 +415,8 @@ export struct EnhancedNavigationModule {
   /**
    * 位置信息面板
    */
-  @Builder LocationPanel() {
+  @Builder
+  LocationPanel(): void {
     Row() {
       Column() {
         Text(`${(this.speed * 3.6).toFixed(0)}`)
@@ -452,7 +456,8 @@ export struct EnhancedNavigationModule {
   /**
    * 搜索结果面板
    */
-  @Builder SearchResultPanel() {
+  @Builder
+  SearchResultPanel(): void {
     Column() {
       // 标题栏
       Row() {
@@ -512,7 +517,8 @@ export struct EnhancedNavigationModule {
   /**
    * POI列表项
    */
-  @Builder POIItem(poi: POIResult) {
+  @Builder
+  POIItem(poi: POIResult): void {
     Row() {
       Column() {
         Text(poi.name)
@@ -549,7 +555,8 @@ export struct EnhancedNavigationModule {
   /**
    * 地图按钮
    */
-  @Builder MapBtn(text: string, action: () => void) {
+  @Builder
+  MapBtn(text: string, action: () => void): void {
     Button(text)
       .type(ButtonType.Circle)
       .width(50)
