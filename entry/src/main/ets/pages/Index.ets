@@ -2,9 +2,11 @@ import { EnhancedNavigationModule } from '../view/EnhancedNavigationModule'
 import { MediaModule } from '../view/MediaModule'
 import { CollaborationModule } from '../view/CollaborationModule'
 import { CarStatusModule } from '../view/CarStatusModule'
+import { FavoritePlace } from '../models/BackendModels'
 import { common } from '@kit.AbilityKit'
 import { display } from '@kit.ArkUI'
 import curves from '@ohos.curves'
+import router from '@ohos.router'
 
 interface ModuleConfig {
   title: string
@@ -19,6 +21,10 @@ struct Index {
   @State currentIndex: number = 0
   @State isExpanded: boolean = false
   private controller: TabsController = new TabsController()
+  
+  // 导航目的地参数
+  @State navigationDestination: FavoritePlace | null = null
+  private checkInterval: number = -1
 
   // === 坐标系统 ===
   @State ballX: number = 0
@@ -33,15 +39,17 @@ struct Index {
 
   private readonly menuItems: ModuleConfig[] = [
     { title: "车况", index: 0, angle: -90, icon: "🚗" },
-    { title: "导航", index: 1, angle: 0, icon: "🧭" },
-    { title: "娱乐", index: 2, angle: 90, icon: "🎵" },
-    { title: "协同", index: 3, angle: 180, icon: "🤝" }
+    { title: "导航", index: 1, angle: -45, icon: "🧭" },
+    { title: "娱乐", index: 2, angle: 45, icon: "🎵" },
+    { title: "协同", index: 3, angle: 135, icon: "🤝" },
+    { title: "我的", index: 4, angle: 180, icon: "👤" }
   ]
 
   private startX: number = 0
   private startY: number = 0
 
   aboutToAppear() {
+    console.log('[Index] ========== aboutToAppear 开始 ==========');
     try {
       let context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       let windowClass = context.windowStage.getMainWindowSync();
@@ -53,7 +61,126 @@ struct Index {
 
       this.ballX = this.screenWidthVp - this.BALL_SIZE - 30;
       this.ballY = this.screenHeightVp - this.BALL_SIZE - 120;
-    } catch (err) {}
+      
+      console.log('[Index] 屏幕尺寸初始化完成:', this.screenWidthVp, 'x', this.screenHeightVp);
+    } catch (err) {
+      console.error('[Index] 初始化窗口失败:', err);
+    }
+    
+    // 启动定时器检查AppStorage
+    this.startCheckingAppStorage();
+    
+    // 立即检查一次导航目的地
+    setTimeout(() => {
+      this.checkNavigationDestination();
+    }, 500);
+    
+    console.log('[Index] ========== aboutToAppear 完成 ==========');
+  }
+  
+  aboutToDisappear() {
+    console.log('[Index] aboutToDisappear - 清理定时器');
+    // 清除定时器
+    if (this.checkInterval !== -1) {
+      clearInterval(this.checkInterval);
+    }
+  }
+  
+  /**
+   * 启动定时器检查AppStorage中的导航目的地
+   */
+  startCheckingAppStorage() {
+    console.log('[Index] 启动AppStorage监听 - 开始');
+    let checkCount = 0;
+    this.checkInterval = setInterval(() => {
+      checkCount++;
+      if (checkCount % 50 === 0) {
+        console.log('[Index] AppStorage检查中... 已检查', checkCount, '次');
+      }
+      
+      // 检查是否需要切换到导航Tab
+      const shouldSwitch = AppStorage.get<boolean>('shouldSwitchToNavigation');
+      const navDest = AppStorage.get<FavoritePlace>('navigationDestination');
+      
+      if (shouldSwitch && navDest) {
+        console.log('[Index] ✅ 检测到导航请求:', navDest.name);
+        
+        // 清除标志
+        AppStorage.delete('shouldSwitchToNavigation');
+        AppStorage.delete('navigationDestination');
+        
+        // 先切换Tab
+        console.log('[Index] 准备切换到导航Tab (index=1)');
+        this.currentIndex = 1;
+        this.controller.changeIndex(1);
+        
+        // 延迟设置导航目的地,确保Tab切换完成
+        setTimeout(() => {
+          this.navigationDestination = navDest;
+          console.log('[Index] ✅ 已完成Tab切换和导航目的地设置');
+        }, 300);
+      }
+    }, 100);
+  }
+  
+  onPageShow() {
+    // 优先从 router 参数获取导航目的地
+    try {
+      const params = router.getParams() as Record<string, Object>;
+      
+      // 方式1：从收藏页面传递的参数格式 (action + destination)
+      if (params && params['action'] === 'navigate') {
+        const destination = params['destination'] as FavoritePlace;
+        
+        // 切换到导航Tab
+        this.currentIndex = 1;
+        this.controller.changeIndex(1);
+        
+        // 延迟设置导航目的地，确保Tab切换完成
+        setTimeout(() => {
+          this.navigationDestination = destination;
+        }, 300);
+        
+        return;
+      }
+      
+      // 方式2：从历史页面传递的参数格式 (navigationDestination)
+      if (params && params['navigationDestination']) {
+        const destination = params['navigationDestination'] as FavoritePlace;
+        
+        // 切换到导航Tab
+        this.currentIndex = 1;
+        this.controller.changeIndex(1);
+        
+        // 延迟设置导航目的地，确保Tab切换完成
+        setTimeout(() => {
+          this.navigationDestination = destination;
+        }, 300);
+        
+        return;
+      }
+    } catch (err) {
+      console.error('[Index] 获取 router 参数失败:', err);
+    }
+    
+    // 备用方案：检查AppStorage中的导航目的地
+    this.checkNavigationDestination();
+  }
+  
+  /**
+   * 检查并处理导航目的地
+   */
+  checkNavigationDestination() {
+    const navDest = AppStorage.get<FavoritePlace>('navigationDestination');
+    if (navDest) {
+      // 清除AppStorage中的参数
+      AppStorage.delete('navigationDestination');
+      // 切换到导航Tab
+      this.currentIndex = 1;
+      this.controller.changeIndex(1);
+      // 设置导航目的地
+      this.navigationDestination = navDest;
+    }
   }
 
   toggleExpand() {
@@ -79,7 +206,11 @@ struct Index {
       // 1. 内容层
       Tabs({ barPosition: BarPosition.End, controller: this.controller }) {
         TabContent() { CarStatusModule() }.backgroundColor('#000000')
-        TabContent() { EnhancedNavigationModule() }.backgroundColor('#000000')
+        TabContent() { 
+          EnhancedNavigationModule({ 
+            externalDestination: this.navigationDestination 
+          }) 
+        }.backgroundColor('#000000')
         TabContent() { MediaModule({ isPageVisible: this.currentIndex === 2 }) }.backgroundColor('#000000')
         TabContent() { CollaborationModule() }.backgroundColor('#000000')
       }
@@ -127,11 +258,17 @@ struct Index {
       .border({ width: 0.5, color: 'rgba(255,255,255,0.15)' })
       .onClick(() => {
         // === 逻辑修正 ===
-        // 1. 切换 Tab
-        this.currentIndex = item.index
-        this.controller.changeIndex(item.index)
-        // 2. 【关键】这里删除了 this.toggleExpand()
-        // 这样点击切换时，菜单不会收回去，您可以继续看其他状态
+        if (item.index === 4) {
+          // "我的"选项 - 跳转到个人中心页面
+          router.pushUrl({ url: 'pages/UserCenterPage' })
+          this.toggleExpand() // 收起菜单
+        } else {
+          // 其他选项 - 切换 Tab
+          this.currentIndex = item.index
+          this.controller.changeIndex(item.index)
+          // 这里删除了 this.toggleExpand()
+          // 这样点击切换时，菜单不会收回去，您可以继续看其他状态
+        }
       })
 
       // 文字

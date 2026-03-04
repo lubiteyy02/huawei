@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>高德地图</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+        }
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+        #container {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+    <script src="https://webapi.amap.com/maps?v=2.0&key=2455309b8d8bb76cfdfebccb98f20153"></script>
+    <style>
+        .amap-logo, .amap-copyright {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+    <script>
+        let map = null;
+        let currentPolyline = null;
+        let markers = [];
+        let currentLocationMarker = null;
+        
+        // 初始化地图 - 2D模式
+        function initMap() {
+            map = new AMap.Map('container', {
+                zoom: 15,
+                center: [114.309994670642, 30.486874173982763],
+                mapStyle: 'amap://styles/normal',
+                showLabel: true,
+                features: ['bg', 'road', 'building', 'point']
+            });
+            
+            console.log('地图初始化完成');
+            
+            if (window.mapController) {
+                window.mapController.postMessage('mapLoaded');
+            }
+        }
+        
+        // 设置地图中心
+        function setCenter(lng, lat, zoom) {
+            if (map) {
+                map.setCenter([lng, lat]);
+                if (zoom) {
+                    map.setZoom(zoom);
+                }
+            }
+        }
+        
+
+        // 绘制路线
+        function drawRoute(path) {
+            clearOverlays();
+            
+            if (!path || path.length === 0) {
+                console.error('路线坐标为空');
+                return;
+            }
+            
+            console.log('绘制路线: 起点', path[0], '终点', path[path.length - 1]);
+            
+            // 创建路线
+            currentPolyline = new AMap.Polyline({
+                path: path,
+                strokeColor: '#4A90E2',
+                strokeWeight: 6,
+                strokeOpacity: 0.8,
+                lineJoin: 'round',
+                lineCap: 'round',
+                showDir: true,
+                dirColor: '#FFFFFF',
+                zIndex: 50
+            });
+            
+            map.add(currentPolyline);
+            
+            // 添加起点标记
+            if (path.length > 0) {
+                const startMarker = new AMap.Marker({
+                    position: path[0],
+                    title: '起点',
+                    icon: new AMap.Icon({
+                        size: new AMap.Size(40, 50),
+                        image: 'https://webapi.amap.com/theme/v1.3/markers/n/start.png',
+                        imageSize: new AMap.Size(40, 50)
+                    }),
+                    offset: new AMap.Pixel(-20, -50),
+                    zIndex: 100,
+                    animation: 'AMAP_ANIMATION_DROP'
+                });
+                map.add(startMarker);
+                markers.push(startMarker);
+                
+                // 添加终点标记
+                const endMarker = new AMap.Marker({
+                    position: path[path.length - 1],
+                    title: '终点',
+                    icon: new AMap.Icon({
+                        size: new AMap.Size(40, 50),
+                        image: 'https://webapi.amap.com/theme/v1.3/markers/n/end.png',
+                        imageSize: new AMap.Size(40, 50)
+                    }),
+                    offset: new AMap.Pixel(-20, -50),
+                    zIndex: 100,
+                    animation: 'AMAP_ANIMATION_DROP'
+                });
+                map.add(endMarker);
+                markers.push(endMarker);
+            }
+            
+            // 自动调整视野
+            map.setFitView(null, false, [100, 100, 100, 100]);
+        }
+        
+        // 清除所有覆盖物
+        function clearOverlays() {
+            if (currentPolyline) {
+                map.remove(currentPolyline);
+                currentPolyline = null;
+            }
+            
+            if (markers.length > 0) {
+                map.remove(markers);
+                markers = [];
+            }
+        }
+        
+        // 添加标记
+        function addMarker(lng, lat, title) {
+            const marker = new AMap.Marker({
+                position: [lng, lat],
+                title: title
+            });
+            map.add(marker);
+            markers.push(marker);
+            return markers.length - 1;
+        }
+        
+        // 添加当前位置标记
+        function addCurrentLocationMarker(lng, lat) {
+            if (currentLocationMarker) {
+                map.remove(currentLocationMarker);
+            }
+            
+            currentLocationMarker = new AMap.Marker({
+                position: [lng, lat],
+                title: '当前位置',
+                icon: new AMap.Icon({
+                    size: new AMap.Size(20, 20),
+                    image: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMTAiIGN5PSIxMCIgcj0iOCIgZmlsbD0iIzAwN0FGRiIgc3Ryb2tlPSIjRkZGRkZGIiBzdHJva2Utd2lkdGg9IjIiLz48L3N2Zz4=',
+                    imageSize: new AMap.Size(20, 20)
+                }),
+                offset: new AMap.Pixel(-10, -10),
+                zIndex: 200
+            });
+            
+            map.add(currentLocationMarker);
+        }
+        
+        // 缩放地图
+        function setZoom(zoom) {
+            if (map) {
+                map.setZoom(zoom);
+            }
+        }
+        
+        // 获取当前缩放级别
+        function getZoom() {
+            return map ? map.getZoom() : 15;
+        }
+        
+        // 接收来自ArkTS的消息
+        window.addEventListener('message', function(event) {
+            try {
+                const data = JSON.parse(event.data);
+                
+                switch(data.action) {
+                    case 'setCenter':
+                        setCenter(data.lng, data.lat, data.zoom);
+                        break;
+                    case 'drawRoute':
+                        console.log('执行drawRoute, 坐标点数:', data.path ? data.path.length : 0);
+                        drawRoute(data.path);
+                        break;
+                    case 'clearOverlays':
+                        clearOverlays();
+                        break;
+                    case 'addMarker':
+                        addMarker(data.lng, data.lat, data.title);
+                        break;
+                    case 'addCurrentLocationMarker':
+                        addCurrentLocationMarker(data.lng, data.lat);
+                        break;
+                    case 'setZoom':
+                        setZoom(data.zoom);
+                        break;
+                    default:
+                        console.warn('未知的action:', data.action);
+                }
+            } catch (e) {
+                console.error('WebView消息处理错误:', e);
+            }
+        });
+        
+        // 页面加载完成后初始化地图
+        window.onload = function() {
+            initMap();
+        };
+    </script>
+</body>
+</html>

@@ -8,6 +8,7 @@ import { testConnection } from './config/database';
 dotenv.config();
 
 const app = express();
+
 const PORT = process.env.PORT || 3000;
 
 // 中间件

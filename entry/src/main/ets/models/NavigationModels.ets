@@ -3,6 +3,16 @@
  */
 
 /**
+ * 标记类型枚举
+ */
+export enum MarkerType {
+  START = 'start',       // 起点
+  END = 'end',           // 终点
+  POI = 'poi',           // 兴趣点
+  CURRENT = 'current'    // 当前位置
+}
+
+/**
  * 位置信息
  */
 export interface Location {
@@ -55,6 +65,11 @@ export interface POIInfo {
   photos?: string[];       // 图片
   businessHours?: string;  // 营业时间
 }
+
+/**
+ * POI搜索结果（别名）
+ */
+export type POIResult = POIInfo;
 
 /**
  * 收藏地点

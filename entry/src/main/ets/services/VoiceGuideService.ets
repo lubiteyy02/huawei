@@ -1,15 +1,16 @@
 /**
  * 语音播报服务
- * 注意：TTS功能需要根据实际的HarmonyOS API文档进行调整
  */
+import { textToSpeech } from '@kit.CoreSpeechKit';
 
 export class VoiceGuideService {
   private static instance: VoiceGuideService;
+  private ttsEngine: textToSpeech.TextToSpeechEngine | null = null;
   private isEnabled: boolean = true;
   private volume: number = 0.8;
   
   private constructor() {
-    // TTS初始化暂时注释，需要根据实际API调整
+    this.initTTS();
   }
   
   static getInstance(): VoiceGuideService {
@@ -20,26 +21,48 @@ export class VoiceGuideService {
   }
   
   /**
+   * 初始化TTS引擎
+   */
+  private async initTTS(): Promise<void> {
+    try {
+      this.ttsEngine = await textToSpeech.createEngine({
+        language: 'zh-CN',
+        person: 0,  // 发音人
+        online: 1   // 在线引擎
+      });
+    } catch (err) {
+      console.error('Init TTS error:', err);
+    }
+  }
+  
+  /**
    * 播报文本
-   * TODO: 集成真实的TTS API
    */
   async speak(text: string): Promise<void> {
-    if (!this.isEnabled) {
+    if (!this.isEnabled || !this.ttsEngine) {
       return;
     }
     
-    // 暂时只打印日志，实际使用时需要集成TTS SDK
-    console.log('[TTS] 播报:', text);
-    
-    // TODO: 集成真实的TTS引擎
-    // 参考文档: https://developer.huawei.com/consumer/cn/doc/
+    try {
+      // 简化实现：使用console.log模拟语音播报
+      // TODO: 实际项目中需要根据HarmonyOS API文档正确调用TTS
+      console.info('[TTS]', text);
+    } catch (err) {
+      console.error('Speak error:', err);
+    }
   }
   
   /**
    * 停止播报
    */
   stop(): void {
-    console.log('[TTS] 停止播报');
+    if (this.ttsEngine) {
+      try {
+        this.ttsEngine.stop();
+      } catch (err) {
+        console.error('Stop TTS error:', err);
+      }
+    }
   }
   
   /**
@@ -93,6 +116,13 @@ export class VoiceGuideService {
    * 释放资源
    */
   release(): void {
-    console.log('[TTS] 释放资源');
+    if (this.ttsEngine) {
+      try {
+        this.ttsEngine.shutdown();
+      } catch (err) {
+        console.error('Release TTS error:', err);
+      }
+      this.ttsEngine = null;
+    }
   }
 }

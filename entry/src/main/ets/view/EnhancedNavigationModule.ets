@@ -1,29 +1,32 @@
 /**
  * 增强版导航模块
  * 集成完整的导航功能：定位、路径规划、导航指引、POI搜索
+ * 使用IP定位（简单可靠）
  */
-import { map, mapCommon, MapComponent } from '@kit.MapKit';
-import { geoLocationManager } from '@kit.LocationKit';
-import { abilityAccessCtrl, common } from '@kit.AbilityKit';
+import { webview } from '@kit.ArkWeb';
 import { MapService, Location, POIResult } from '../services/MapService';
 import { NavigationService, NavigationState, NavigationInfo } from '../services/NavigationService';
 import { VoiceGuideService } from '../services/VoiceGuideService';
+import { FavoriteService } from '../services/FavoriteService';
+import { NavigationHistoryService } from '../services/NavigationHistoryService';
+import { AuthService } from '../services/AuthService';
+import { FavoritePlace } from '../models/BackendModels';
+import promptAction from '@ohos.promptAction';
 
 @Component
 export struct EnhancedNavigationModule {
+  // 外部传入的导航目的地
+  @Prop @Watch('onDestinationChange') externalDestination: FavoritePlace | null = null;
+  
   // 地图相关
   @State isMapLoaded: boolean = false;
-  @State isNightMode: boolean = true;
-  @State hasLocationPermission: boolean = false;
   @State zoomLevel: number = 15;
-  private mapController: map.MapComponentController | null = null;
+  private webController: webview.WebviewController = new webview.WebviewController();
   
   // 定位相关
-  @State latitude: number = 39.9042;
-  @State longitude: number = 116.4074;
-  @State speed: number = 0;
-  @State userHeading: number = 0;
-  @State addressText: string = "等待GPS信号...";
+  @State latitude: number = 30.486874173982763;
+  @State longitude: number = 114.309994670642;
+  @State addressText: string = "正在定位...";
   
   // 导航相关
   @State isNavigating: boolean = false;
@@ -37,142 +40,170 @@ export struct EnhancedNavigationModule {
   @State searchKeyword: string = '';
   @State searchResults: POIResult[] = [];
   @State isSearching: boolean = false;
+  @State showSearchHistory: boolean = false;
+  @State searchHistory: string[] = [];
   
   // 服务实例
   private mapService: MapService = MapService.getInstance();
   private navigationService: NavigationService = NavigationService.getInstance();
   private voiceService: VoiceGuideService = VoiceGuideService.getInstance();
-  private locationCallback: (location: geoLocationManager.Location) => void = (location) => { 
-    this.updateLocationState(location); 
-  };
+  private favoriteService: FavoriteService = FavoriteService.getInstance();
+  private historyService: NavigationHistoryService = NavigationHistoryService.getInstance();
+  private authService: AuthService = AuthService.getInstance();
   
   aboutToAppear() {
-    this.reqPermissionsFromUser();
     // 监听导航状态变化
     this.navigationService.addListener((info) => {
       this.onNavigationUpdate(info);
     });
+    
+    // 检查是否有外部传入的导航目的地
+    if (this.externalDestination) {
+      this.handleExternalDestination();
+    }
+  }
+  
+  /**
+   * 监听外部传入的导航目的地变化
+   */
+  onDestinationChange() {
+    if (this.externalDestination) {
+      this.handleExternalDestination();
+    }
+  }
+  
+  /**
+   * 处理外部传入的导航目的地
+   */
+  handleExternalDestination() {
+    if (!this.externalDestination) {
+      return;
+    }
+    
+    console.log('[Navigation] 收到外部导航目的地:', this.externalDestination.name);
+    console.log('[Navigation] 坐标:', this.externalDestination.latitude, this.externalDestination.longitude);
+    
+    const destination: Location = {
+      latitude: this.externalDestination.latitude,
+      longitude: this.externalDestination.longitude
+    };
+    
+    // 如果地图已加载,立即启动导航;否则等待地图加载
+    if (this.isMapLoaded) {
+      console.log('[Navigation] 地图已加载,立即启动导航');
+      // 延迟一下,确保WebView完全准备好
+      setTimeout(() => {
+        this.startNavigation(destination);
+      }, 500);
+    } else {
+      console.log('[Navigation] 等待地图加载...');
+      // 等待地图加载完成后再启动导航
+      let retryCount = 0;
+      const maxRetries = 100; // 10秒超时
+      const checkInterval = setInterval(() => {
+        retryCount++;
+        if (this.isMapLoaded) {
+          console.log('[Navigation] 地图加载完成(重试', retryCount, '次),启动导航');
+          clearInterval(checkInterval);
+          // 延迟一下,确保WebView完全准备好
+          setTimeout(() => {
+            this.startNavigation(destination);
+          }, 500);
+        } else if (retryCount >= maxRetries) {
+          console.error('[Navigation] 等待地图加载超时');
+          clearInterval(checkInterval);
+        }
+      }, 100);
+    }
   }
   
   aboutToDisappear() {
-    try {
-      geoLocationManager.off('locationChange', this.locationCallback);
-    } catch (err) {}
     this.voiceService.release();
   }
   
   /**
-   * 请求定位权限
+   * IP定位
    */
-  async reqPermissionsFromUser() {
-    let atManager = abilityAccessCtrl.createAtManager();
+  async startIPLocation() {
     try {
-      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      const data = await atManager.requestPermissionsFromUser(context, [
-        'ohos.permission.LOCATION',
-        'ohos.permission.APPROXIMATELY_LOCATION'
-      ]);
-      if (data.authResults[0] === 0) {
-        this.hasLocationPermission = true;
-        if (this.mapController) this.startRealLocation();
-      }
-    } catch (err) {
-      console.error('Permission error:', err);
-    }
-  }
-  
-  /**
-   * 开始实时定位
-   */
-  async startRealLocation() {
-    if (!this.mapController || !this.hasLocationPermission) return;
-    try {
-      this.mapController.setMyLocationEnabled(true);
-      this.mapController.setZoomControlsEnabled(true);
-      this.mapController.setMyLocationControlsEnabled(true);
+      console.log('[Navigation] 开始IP定位...');
+      this.addressText = "IP定位中...";
       
-      let req: geoLocationManager.LocationRequest = {
-        priority: 0x203,
-        scenario: 0x301,
-        timeInterval: 1,
-        distanceInterval: 0,
-        maxAccuracy: 0
+      const location = await this.mapService.getCurrentLocation();
+      
+      this.latitude = location.latitude;
+      this.longitude = location.longitude;
+      this.addressText = location.address ? `IP定位 (${location.address})` : "默认位置(武汉)";
+      
+      console.log('[Navigation] IP定位完成:', this.latitude, this.longitude);
+      
+      // 更新地图标记
+      const currentLocation: Location = {
+        latitude: this.latitude,
+        longitude: this.longitude
       };
-      geoLocationManager.on('locationChange', req, this.locationCallback);
-      this.addressText = "定位中...";
+      this.mapService.addCurrentLocationMarker(currentLocation);
+      this.mapService.moveToLocation(currentLocation, this.zoomLevel);
+      
     } catch (err) {
-      console.error('Location error:', err);
-    }
-  }
-  
-  /**
-   * 更新位置状态
-   */
-  updateLocationState(location: geoLocationManager.Location) {
-    this.latitude = location.latitude;
-    this.longitude = location.longitude;
-    this.speed = location.speed;
-    this.userHeading = location.direction;
-    
-    if (!this.isNavigating) {
-      this.addressText = "实时定位";
+      console.error('[Navigation] IP定位失败:', err);
+      this.addressText = "定位失败,使用默认位置";
     }
   }
   
   /**
    * 地图加载完成
    */
-  onMapLoad(controller: map.MapComponentController) {
-    this.mapController = controller;
+  onMapLoad() {
     this.isMapLoaded = true;
-    this.mapService.setMapController(controller);
+    this.mapService.setWebController(this.webController);
     
-    try {
-      this.mapController.setPadding({ top: 0, left: 0, right: 0, bottom: 200 });
-    } catch(e) {}
+    // 移动地图到默认位置
+    const defaultLocation: Location = {
+      latitude: this.latitude,
+      longitude: this.longitude
+    };
+    this.mapService.moveToLocation(defaultLocation, this.zoomLevel);
     
-    if (this.hasLocationPermission) this.startRealLocation();
-    this.updateMapStyle();
-  }
-  
-  /**
-   * 更新地图样式
-   */
-  updateMapStyle() {
-    if (!this.mapController) return;
-    try {
-      this.mapController.setDayNightMode(
-        this.isNightMode ? mapCommon.DayNightMode.NIGHT : mapCommon.DayNightMode.DAY
-      );
-    } catch (e) {}
+    // 延迟添加标记，确保WebView准备好
+    setTimeout(() => {
+      this.mapService.addCurrentLocationMarker(defaultLocation);
+      console.log('[Navigation] 地图初始化完成');
+    }, 300);
+    
+    // 启动IP定位
+    setTimeout(() => {
+      this.startIPLocation();
+    }, 500);
   }
   
   /**
    * 缩放地图
    */
   changeZoom(delta: number): void {
-    if (!this.mapController) return;
+    if (!this.webController) return;
     this.zoomLevel = Math.max(3, Math.min(20, this.zoomLevel + delta));
     try {
-      let cameraUpdate = map.newCameraPosition({
-        target: { latitude: this.latitude, longitude: this.longitude },
-        zoom: this.zoomLevel,
-        tilt: 45,
-        bearing: this.userHeading
+      const message = JSON.stringify({
+        action: 'setZoom',
+        zoom: this.zoomLevel
       });
-      this.mapController.animateCamera(cameraUpdate);
-    } catch(e) {}
+      this.webController.runJavaScript(`window.postMessage('${message}', '*')`);
+    } catch(e) {
+      console.error('Change zoom error:', e);
+    }
   }
   
   /**
    * 回到当前位置
    */
   backToCurrentLocation(): void {
-    if(this.hasLocationPermission && this.mapController) {
-      this.mapService.moveToLocation({
+    if (this.webController) {
+      const currentLocation: Location = {
         latitude: this.latitude,
         longitude: this.longitude
-      }, this.zoomLevel);
+      };
+      this.mapService.moveToLocation(currentLocation, this.zoomLevel);
     }
   }
   
@@ -240,9 +271,11 @@ export struct EnhancedNavigationModule {
     
     this.isSearching = true;
     try {
+      const currentLocation: Location = { latitude: this.latitude, longitude: this.longitude };
       const results = await this.mapService.searchPOI(
         this.searchKeyword,
-        { latitude: this.latitude, longitude: this.longitude }
+        currentLocation,
+        5000
       );
       this.searchResults = results;
     } catch (err) {
@@ -259,20 +292,135 @@ export struct EnhancedNavigationModule {
     this.startNavigation(poi.location);
   }
   
+  /**
+   * 收藏当前位置或POI
+   */
+  async addToFavorites(name: string, address: string, location: Location) {
+    try {
+      console.log('[Navigation] 开始收藏:', name);
+      console.log('[Navigation] 地址:', address);
+      console.log('[Navigation] 坐标:', location.latitude, location.longitude);
+      
+      const isLoggedIn = await this.authService.isLoggedIn();
+      console.log('[Navigation] 登录状态:', isLoggedIn);
+      
+      if (!isLoggedIn) {
+        console.log('[Navigation] 未登录，提示用户登录');
+        promptAction.showToast({
+          message: '请先登录',
+          duration: 2000
+        });
+        return;
+      }
+      
+      const response = await this.favoriteService.addFavorite({
+        name: name,
+        address: address,
+        latitude: location.latitude,
+        longitude: location.longitude
+      });
+      
+      console.log('[Navigation] 收藏响应代码:', response.code);
+      console.log('[Navigation] 收藏响应消息:', response.message);
+      console.log('[Navigation] 完整响应:', JSON.stringify(response));
+      
+      if (response.code === 200) {
+        console.log('[Navigation] 收藏成功');
+        promptAction.showToast({
+          message: '收藏成功',
+          duration: 2000
+        });
+      } else {
+        console.error('[Navigation] 收藏失败:', response.message);
+        promptAction.showToast({
+          message: response.message || '收藏失败',
+          duration: 2000
+        });
+      }
+    } catch (err) {
+      console.error('[Navigation] 收藏异常 - 类型:', typeof err);
+      console.error('[Navigation] 收藏异常 - 详情:', JSON.stringify(err));
+      promptAction.showToast({
+        message: '收藏失败，请稍后重试',
+        duration: 2000
+      });
+    }
+  }
+  
+  /**
+   * 加载搜索历史
+   */
+  async loadSearchHistory() {
+    try {
+      const response = await this.historyService.getHistory();
+      // 提取最近5条搜索记录的目的地名称
+      if (response.data && response.data.list) {
+        this.searchHistory = response.data.list.slice(0, 5).map(item => item.endName);
+      } else {
+        this.searchHistory = [];
+      }
+    } catch (err) {
+      console.error('[Navigation] 加载搜索历史失败:', err);
+      this.searchHistory = [];
+    }
+  }
+  
+  /**
+   * 保存导航历史
+   */
+  async saveNavigationHistory(destination: Location, destinationName: string) {
+    try {
+      const isLoggedIn = await this.authService.isLoggedIn();
+      if (!isLoggedIn) {
+        return;
+      }
+      
+      await this.historyService.saveHistory({
+        startLat: this.latitude,
+        startLng: this.longitude,
+        startName: '当前位置',
+        startAddress: this.addressText,
+        endLat: destination.latitude,
+        endLng: destination.longitude,
+        endName: destinationName,
+        endAddress: destinationName,
+        distance: 0, // 实际距离由后端计算
+        duration: 0  // 实际时长由后端计算
+      });
+      
+      console.log('[Navigation] 导航历史已保存');
+    } catch (err) {
+      console.error('[Navigation] 保存导航历史失败:', err);
+    }
+  }
+  
   build() {
     Stack({ alignContent: Alignment.Bottom }) {
-      // 1. 地图层
+      // 1. 地图层 - 使用WebView加载高德地图
       Stack() {
-        MapComponent({
-          mapOptions: {
-            position: { target: { latitude: 39.9, longitude: 116.4 }, zoom: 15 },
-            mapType: mapCommon.MapType.STANDARD
-          },
-          mapCallback: (err, controller) => {
-            if (!err && controller) this.onMapLoad(controller);
-          }
-        })
-        .width('100%').height('100%')
+        Web({ src: $rawfile('amap.html'), controller: this.webController })
+          .width('100%')
+          .height('100%')
+          .onPageEnd(() => {
+            console.log('地图页面加载完成');
+            this.onMapLoad();
+          })
+          .onErrorReceive((event) => {
+            console.error('地图加载错误:', event?.error);
+          })
+          .onConsole((event) => {
+            // 转发WebView的console日志到ArkTS
+            if (event && event.message) {
+              const msg = event.message;
+              const message = msg.getMessage();
+              const sourceId = msg.getSourceId();
+              const lineNumber = msg.getLineNumber();
+              
+              // 输出WebView日志，包含来源信息
+              console.log('[WebView]', message, 'at', sourceId, ':', lineNumber);
+            }
+            return false;
+          })
       }
       
       // 2. 顶部搜索栏
@@ -302,56 +450,126 @@ export struct EnhancedNavigationModule {
    */
   @Builder
   SearchBar(): void {
-    Row() {
-      TextInput({ placeholder: '搜索地点、地址', text: this.searchKeyword })
-        .layoutWeight(1)
+    Column() {
+      Row() {
+        TextInput({ placeholder: '搜索地点、地址' })
+          .layoutWeight(1)
+          .height(48)
+          .backgroundColor(Color.White)
+          .borderRadius(24)
+          .padding({ left: 20, right: 20 })
+          .onChange((value: string): void => {
+            this.searchKeyword = value;
+          })
+          .onFocus(() => {
+            // 获得焦点时加载搜索历史
+            this.showSearchHistory = true;
+            this.loadSearchHistory();
+          })
+          .onBlur(() => {
+            // 延迟隐藏，以便点击历史记录
+            setTimeout(() => {
+              this.showSearchHistory = false;
+            }, 200);
+          })
+          .onSubmit((): void => {
+            this.showSearchPanel = true;
+            this.showSearchHistory = false;
+            this.searchPOI();
+            return;
+          })
+        
+        // 收藏按钮
+        Button() {
+          Text('⭐')
+            .fontSize(20)
+        }
         .height(48)
-        .backgroundColor(Color.White)
-        .borderRadius(24)
-        .padding({ left: 20, right: 20 })
-        .onChange((value: string): void => {
-          this.searchKeyword = value;
-        })
-        .onSubmit((): void => {
-          this.showSearchPanel = true;
-          this.searchPOI();
-        })
-      
-      Button('搜索')
-        .height(48)
-        .backgroundColor('#00E5FF')
+        .width(48)
+        .backgroundColor('rgba(255,255,255,0.9)')
         .borderRadius(24)
         .margin({ left: 10 })
-        .onClick((): void => {
-          this.showSearchPanel = true;
-          this.searchPOI();
+        .onClick(async () => {
+          // 收藏当前位置
+          await this.addToFavorites(
+            '当前位置',
+            this.addressText,
+            { latitude: this.latitude, longitude: this.longitude }
+          );
         })
+        
+        Button('搜索')
+          .height(48)
+          .backgroundColor('#00E5FF')
+          .borderRadius(24)
+          .margin({ left: 10 })
+          .onClick((): void => {
+            this.showSearchPanel = true;
+            this.showSearchHistory = false;
+            this.searchPOI();
+          })
+      }
+      .width('90%')
+      
+      // 搜索历史面板
+      if (this.showSearchHistory && this.searchHistory.length > 0) {
+        Column() {
+          Text('搜索历史')
+            .fontSize(14)
+            .fontColor('#666')
+            .width('100%')
+            .padding({ left: 15, top: 10, bottom: 5 })
+          
+          ForEach(this.searchHistory, (keyword: string) => {
+            Row() {
+              Text('🕐')
+                .fontSize(16)
+                .margin({ right: 10 })
+              
+              Text(keyword)
+                .fontSize(14)
+                .fontColor('#333')
+                .layoutWeight(1)
+            }
+            .width('100%')
+            .height(40)
+            .padding({ left: 15, right: 15 })
+            .onClick(() => {
+              this.searchKeyword = keyword;
+              this.showSearchPanel = true;
+              this.showSearchHistory = false;
+              this.searchPOI();
+            })
+          })
+        }
+        .width('90%')
+        .backgroundColor(Color.White)
+        .borderRadius(12)
+        .margin({ top: 10 })
+        .padding({ bottom: 10 })
+      }
     }
-    .width('90%')
+    .width('100%')
+    .alignItems(HorizontalAlign.Center)
     .padding(16)
     .position({ x: '5%', y: 60 })
   }
   
-  /**
-   * 控制按钮
-   */
   @Builder
   ControlButtons(): void {
     Column({ space: 15 }) {
-      this.MapBtn(this.isNightMode ? "☀️" : "🌙", (): void => {
-        this.isNightMode = !this.isNightMode;
-        this.updateMapStyle();
-      })
       this.MapBtn("＋", (): void => this.changeZoom(1))
+      
       this.MapBtn("－", (): void => this.changeZoom(-1))
+      
       this.MapBtn("◎", (): void => this.backToCurrentLocation())
       
       if (this.isNavigating) {
         this.MapBtn("■", (): void => this.stopNavigation())
       }
     }
-    .alignItems(HorizontalAlign.End)
-    .position({ x: '100%', y: '40%' })
+    .alignItems(HorizontalAlign.Center)
+    .position({ x: '100%', y: '50%' })
     .markAnchor({ x: '100%', y: '50%' })
     .padding({ right: 20 })
   }
@@ -419,19 +637,6 @@ export struct EnhancedNavigationModule {
   LocationPanel(): void {
     Row() {
       Column() {
-        Text(`${(this.speed * 3.6).toFixed(0)}`)
-          .fontSize(32)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#00E5FF')
-        Text("km/h")
-          .fontSize(12)
-          .fontColor('rgba(255,255,255,0.6)')
-      }
-      .margin({ right: 20 })
-      
-      Divider().vertical(true).height(30).color('rgba(255,255,255,0.2)')
-      
-      Column() {
         Text(this.addressText)
           .fontSize(16)
           .fontColor(Color.White)
@@ -442,7 +647,6 @@ export struct EnhancedNavigationModule {
           .margin({ top: 4 })
       }
       .alignItems(HorizontalAlign.Start)
-      .margin({ left: 20 })
     }
     .padding({ left: 30, right: 30, top: 16, bottom: 16 })
     .backgroundColor('rgba(15, 23, 42, 0.9)')
@@ -537,12 +741,28 @@ export struct EnhancedNavigationModule {
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
       
+      // 收藏按钮
+      Button() {
+        Text('⭐')
+          .fontSize(18)
+      }
+      .height(36)
+      .width(36)
+      .backgroundColor('rgba(255,255,255,0.1)')
+      .borderRadius(18)
+      .margin({ right: 8 })
+      .onClick(async () => {
+        await this.addToFavorites(poi.name, poi.address, poi.location);
+      })
+      
       Button('导航')
         .height(36)
         .backgroundColor('#00E5FF')
         .borderRadius(18)
         .onClick(() => {
           this.selectPOI(poi);
+          // 保存导航历史
+          this.saveNavigationHistory(poi.location, poi.name);
         })
     }
     .width('100%')

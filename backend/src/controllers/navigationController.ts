@@ -25,7 +25,9 @@ export async function getNavigationHistory(req: Request, res: Response) {
     const userId = req.userId;
     const { page = 1, pageSize = 20 } = req.query;
     
-    const offset = (Number(page) - 1) * Number(pageSize);
+    const pageNum = Number(page);
+    const pageSizeNum = Number(pageSize);
+    const offset = (pageNum - 1) * pageSizeNum;
     
     // 获取总数
     const countResult = await query<any[]>(
@@ -34,24 +36,41 @@ export async function getNavigationHistory(req: Request, res: Response) {
     );
     const total = countResult[0].total;
     
-    // 获取列表
+    // 获取列表（注意：MySQL prepared statements 不支持 LIMIT/OFFSET 占位符）
     const history = await query<NavigationHistory[]>(
-      'SELECT * FROM navigation_history WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
-      [userId, Number(pageSize), offset]
+      `SELECT * FROM navigation_history WHERE user_id = ? ORDER BY created_at DESC LIMIT ${pageSizeNum} OFFSET ${offset}`,
+      [userId]
     );
+    
+    // 转换字段名：下划线转驼峰
+    const formattedHistory = history.map(item => ({
+      id: item.id,
+      userId: item.user_id,
+      startName: item.start_name,
+      startAddress: item.start_address,
+      startLat: item.start_lat,
+      startLng: item.start_lng,
+      endName: item.end_name,
+      endAddress: item.end_address,
+      endLat: item.end_lat,
+      endLng: item.end_lng,
+      distance: item.distance,
+      duration: item.duration,
+      createdAt: item.created_at
+    }));
     
     res.json({
       code: 200,
       message: '获取成功',
       data: {
-        list: history,
+        list: formattedHistory,
         total,
-        page: Number(page),
-        pageSize: Number(pageSize)
+        page: pageNum,
+        pageSize: pageSizeNum
       }
     });
   } catch (error) {
-    console.error('Get navigation history error:', error);
+    console.error('[navigationController] Get navigation history error:', error);
     res.status(500).json({
       code: 500,
       message: '服务器错误'

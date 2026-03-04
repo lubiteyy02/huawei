@@ -52,34 +52,56 @@ export async function getFavorites(req: Request, res: Response) {
  */
 export async function addFavorite(req: Request, res: Response) {
   try {
+    console.log('=== 收藏请求开始 ===');
+    console.log('userId:', req.userId);
+    console.log('请求体:', JSON.stringify(req.body));
+    
     const userId = req.userId;
     const { name, address, latitude, longitude, category, icon } = req.body;
     
+    // 验证userId
+    if (!userId) {
+      console.error('❌ userId未定义');
+      return res.status(401).json({
+        code: 401,
+        message: '用户未认证'
+      });
+    }
+    
     // 验证参数
     if (!name || !address || !latitude || !longitude) {
+      console.error('❌ 缺少必要参数:', { name, address, latitude, longitude });
       return res.status(400).json({
         code: 400,
         message: '缺少必要参数'
       });
     }
     
+    console.log('✅ 参数验证通过');
+    
     // 检查是否已收藏
+    console.log('检查是否已收藏...');
     const existing = await query<Favorite[]>(
       'SELECT id FROM favorites WHERE user_id = ? AND latitude = ? AND longitude = ?',
       [userId, latitude, longitude]
     );
     
     if (existing.length > 0) {
+      console.log('⚠️ 该地点已收藏');
       return res.status(400).json({
         code: 400,
         message: '该地点已收藏'
       });
     }
     
+    console.log('插入收藏记录...');
     const result: any = await query(
       'INSERT INTO favorites (user_id, name, address, latitude, longitude, category, icon) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [userId, name, address, latitude, longitude, category || 'custom', icon]
+      [userId, name, address, latitude, longitude, category || 'custom', icon || null]
     );
+    
+    console.log('✅ 收藏成功, insertId:', result.insertId);
+    console.log('=== 收藏请求结束 ===');
     
     res.status(201).json({
       code: 200,
@@ -89,10 +111,11 @@ export async function addFavorite(req: Request, res: Response) {
       }
     });
   } catch (error) {
-    console.error('Add favorite error:', error);
+    console.error('❌ Add favorite error:', error);
+    console.error('错误堆栈:', error instanceof Error ? error.stack : 'No stack trace');
     res.status(500).json({
       code: 500,
-      message: '服务器错误'
+      message: '服务器错误: ' + (error instanceof Error ? error.message : String(error))
     });
   }
 }

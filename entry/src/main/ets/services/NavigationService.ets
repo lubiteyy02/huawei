@@ -1,8 +1,8 @@
 /**
  * 导航服务 - 管理导航状态和逻辑
+ * 使用IP定位（不支持实时追踪）
  */
 import { MapService, Location, RouteInfo } from './MapService';
-import { geoLocationManager } from '@kit.LocationKit';
 
 export enum NavigationState {
   IDLE = 0,           // 空闲
@@ -30,7 +30,6 @@ export class NavigationService {
   private static instance: NavigationService;
   private mapService: MapService;
   private navigationInfo: NavigationInfo | null = null;
-  private locationCallback: ((location: geoLocationManager.Location) => void) | null = null;
   private listeners: ((info: NavigationInfo) => void)[] = [];
   
   private constructor() {
@@ -49,8 +48,21 @@ export class NavigationService {
    */
   async startNavigation(destination: Location): Promise<void> {
     try {
-      // 获取当前位置
-      const currentLocation = await this.mapService.getCurrentLocation();
+      // 获取当前位置（IP定位）
+      let currentLocation: Location;
+      try {
+        currentLocation = await this.mapService.getCurrentLocation();
+        console.log('[NavigationService] 获取到当前位置:', currentLocation.latitude, currentLocation.longitude);
+      } catch (err) {
+        console.warn('[NavigationService] 获取当前位置失败，使用默认位置:', String(err));
+        currentLocation = {
+          latitude: 30.486874173982763,
+          longitude: 114.309994670642
+        };
+      }
+      
+      console.log('[NavigationService] 起点:', currentLocation.latitude, currentLocation.longitude);
+      console.log('[NavigationService] 终点:', destination.latitude, destination.longitude);
       
       // 更新状态为规划中
       this.updateNavigationInfo({
@@ -65,7 +77,7 @@ export class NavigationService {
       });
       
       // 规划路线
-      const route = await this.mapService.planRoute(currentLocation, destination);
+      const route = await this.mapService.planRoute(currentLocation, destination, 0);
       
       // 绘制路线
       this.mapService.drawRoute(route);
@@ -82,12 +94,11 @@ export class NavigationService {
         nextInstruction: route.steps[0]?.instruction || '开始导航'
       });
       
-      // 开始监听位置变化
-      this.startLocationTracking();
+      console.log('[NavigationService] 导航已启动（IP定位，无实时追踪）');
       
     } catch (err) {
       console.error('Start navigation error:', err);
-      throw new Error('导航启动失败');
+      throw new Error('导航启动失败: ' + String(err));
     }
   }
   
@@ -95,7 +106,6 @@ export class NavigationService {
    * 停止导航
    */
   stopNavigation(): void {
-    this.stopLocationTracking();
     this.mapService.clearOverlays();
     this.navigationInfo = null;
     this.notifyListeners();
@@ -107,7 +117,6 @@ export class NavigationService {
   pauseNavigation(): void {
     if (this.navigationInfo) {
       this.navigationInfo.state = NavigationState.PAUSED;
-      this.stopLocationTracking();
       this.notifyListeners();
     }
   }
@@ -118,7 +127,6 @@ export class NavigationService {
   resumeNavigation(): void {
     if (this.navigationInfo && this.navigationInfo.state === NavigationState.PAUSED) {
       this.navigationInfo.state = NavigationState.NAVIGATING;
-      this.startLocationTracking();
       this.notifyListeners();
     }
   }
@@ -131,7 +139,7 @@ export class NavigationService {
     
     try {
       const currentLocation = await this.mapService.getCurrentLocation();
-      const route = await this.mapService.planRoute(currentLocation, this.navigationInfo.destination);
+      const route = await this.mapService.planRoute(currentLocation, this.navigationInfo.destination, 0);
       
       this.mapService.clearOverlays();
       this.mapService.drawRoute(route);
@@ -172,97 +180,6 @@ export class NavigationService {
     if (index > -1) {
       this.listeners.splice(index, 1);
     }
-  }
-  
-  /**
-   * 开始位置追踪
-   */
-  private startLocationTracking(): void {
-    this.locationCallback = (location: geoLocationManager.Location) => {
-      this.onLocationUpdate(location);
-    };
-    
-    try {
-      const request: geoLocationManager.LocationRequest = {
-        priority: 0x203,
-        scenario: 0x301,
-        timeInterval: 1,
-        distanceInterval: 0,
-        maxAccuracy: 0
-      };
-      geoLocationManager.on('locationChange', request, this.locationCallback);
-    } catch (err) {
-      console.error('Start location tracking error:', err);
-    }
-  }
-  
-  /**
-   * 停止位置追踪
-   */
-  private stopLocationTracking(): void {
-    if (this.locationCallback) {
-      try {
-        geoLocationManager.off('locationChange', this.locationCallback);
-      } catch (err) {
-        console.error('Stop location tracking error:', err);
-      }
-      this.locationCallback = null;
-    }
-  }
-  
-  /**
-   * 位置更新回调
-   */
-  private onLocationUpdate(location: geoLocationManager.Location): void {
-    if (!this.navigationInfo || this.navigationInfo.state !== NavigationState.NAVIGATING) {
-      return;
-    }
-    
-    const currentLocation: Location = {
-      latitude: location.latitude,
-      longitude: location.longitude
-    };
-    
-    // 更新当前位置
-    this.navigationInfo.currentLocation = currentLocation;
-    
-    // 计算剩余距离（简化计算，实际应使用地图SDK）
-    const distance = this.calculateDistance(
-      currentLocation,
-      this.navigationInfo.destination
-    );
-    
-    this.navigationInfo.remainingDistance = distance;
-    
-    // 检查是否到达
-    if (distance < 50) {  // 50米内认为到达
-      this.navigationInfo.state = NavigationState.ARRIVED;
-      this.navigationInfo.nextInstruction = '您已到达目的地';
-      this.stopLocationTracking();
-    }
-    
-    // 检查是否偏航（简化判断）
-    // TODO: 实际应使用地图SDK判断偏航
-    
-    this.notifyListeners();
-  }
-  
-  /**
-   * 计算两点距离（简化版，使用Haversine公式）
-   */
-  private calculateDistance(loc1: Location, loc2: Location): number {
-    const R = 6371000; // 地球半径（米）
-    const lat1 = loc1.latitude * Math.PI / 180;
-    const lat2 = loc2.latitude * Math.PI / 180;
-    const deltaLat = (loc2.latitude - loc1.latitude) * Math.PI / 180;
-    const deltaLng = (loc2.longitude - loc1.longitude) * Math.PI / 180;
-    
-    const a = Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
-              Math.cos(lat1) * Math.cos(lat2) *
-              Math.sin(deltaLng / 2) * Math.sin(deltaLng / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    
-    return R * c;
   }
   
   /**

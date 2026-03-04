@@ -3,6 +3,10 @@ import { authMiddleware } from '../middleware/auth';
 import * as authController from '../controllers/authController';
 import * as favoriteController from '../controllers/favoriteController';
 import * as navigationController from '../controllers/navigationController';
+import * as routePlanController from '../controllers/routePlanController';
+import * as locationController from '../controllers/locationController';
+import * as feedbackController from '../controllers/feedbackController';
+import * as frequentLocationController from '../controllers/frequentLocationController';
 
 const router = express.Router();
 
@@ -25,5 +29,39 @@ router.get('/navigation/history', authMiddleware, navigationController.getNaviga
 router.post('/navigation/history', authMiddleware, navigationController.saveNavigationHistory);
 router.delete('/navigation/history/:id', authMiddleware, navigationController.deleteNavigationHistory);
 router.delete('/navigation/history', authMiddleware, navigationController.clearNavigationHistory);
+
+// ========== 路线方案相关路由（需要token） ==========
+router.get('/routes', authMiddleware, routePlanController.getRoutePlans);
+router.get('/routes/:id', authMiddleware, routePlanController.getRoutePlanDetail);
+router.post('/routes', authMiddleware, routePlanController.saveRoutePlan);
+router.put('/routes/:id', authMiddleware, routePlanController.updateRoutePlan);
+router.post('/routes/:id/use', authMiddleware, routePlanController.useRoutePlan);
+router.delete('/routes/:id', authMiddleware, routePlanController.deleteRoutePlan);
+
+// ========== 位置相关路由（需要token） ==========
+router.post('/location', authMiddleware, locationController.updateLocation);
+router.get('/location', authMiddleware, locationController.getLocation);
+router.get('/location/:targetUserId', authMiddleware, locationController.getLocation);
+router.post('/location/sharing/toggle', authMiddleware, locationController.toggleLocationSharing);
+router.post('/location/sharing', authMiddleware, locationController.createLocationShare);
+router.get('/location/sharing', authMiddleware, locationController.getLocationShares);
+router.delete('/location/sharing/:id', authMiddleware, locationController.cancelLocationShare);
+router.get('/location/nearby', authMiddleware, locationController.getNearbySharedUsers);
+
+// ========== 反馈相关路由（需要token） ==========
+router.post('/feedback', authMiddleware, feedbackController.submitFeedback);
+router.get('/feedback', authMiddleware, feedbackController.getFeedbackList);
+router.get('/feedback/stats', authMiddleware, feedbackController.getFeedbackStats);
+router.get('/feedback/:id', authMiddleware, feedbackController.getFeedbackDetail);
+router.delete('/feedback/:id', authMiddleware, feedbackController.deleteFeedback);
+
+// ========== 常去地点相关路由（需要token） ==========
+router.post('/frequent-locations/visit', authMiddleware, frequentLocationController.recordVisit);
+router.get('/frequent-locations', authMiddleware, frequentLocationController.getFrequentLocations);
+router.get('/frequent-locations/recommended', authMiddleware, frequentLocationController.getRecommendedLocations);
+router.get('/frequent-locations/stats', authMiddleware, frequentLocationController.getVisitStats);
+router.get('/frequent-locations/:id', authMiddleware, frequentLocationController.getLocationDetail);
+router.put('/frequent-locations/:id', authMiddleware, frequentLocationController.updateLocation);
+router.delete('/frequent-locations/:id', authMiddleware, frequentLocationController.deleteLocation);
 
 export default router;

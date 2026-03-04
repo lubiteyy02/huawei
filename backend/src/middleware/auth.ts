@@ -55,11 +55,9 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
  * 生成JWT token
  */
 export function generateToken(userId: number): string {
-  const expiresIn = process.env.JWT_EXPIRES_IN || '7d';
-  
   return jwt.sign(
     { userId },
     JWT_SECRET,
-    { expiresIn }
+    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' } as jwt.SignOptions
   );
 }
