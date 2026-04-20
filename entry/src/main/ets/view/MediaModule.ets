@@ -74,11 +74,23 @@ export struct MediaModule {
   private async loadLocalCache(): Promise<void> {
     const key = this.activeTab === TabType.MUSIC ? 'local_music_cache' : 'local_radio_cache';
     const cached = await this.cacheService.get<Array<LocalMediaItem | MediaResourceItem>>(key);
-    this.emptyHint = (!cached || cached.length === 0) ? '没有音乐缓存' : '';
-    this.currentItem = cached && cached.length > 0 ? cached[0] : this.getCurrentList()[0];
-    this.statusText = this.emptyHint ? this.emptyHint : '已准备就绪';
-    this.viewToken++;
     this.updateAccent();
+
+    if (cached && cached.length > 0) {
+      this.emptyHint = '';
+      this.currentItem = cached[0];
+      this.statusText = '已加载本地缓存';
+      this.viewToken++;
+      return;
+    }
+
+    this.emptyHint = '没有音乐缓存';
+    this.statusText = '没有音乐缓存';
+    this.currentItem = null;
+    this.viewToken++;
+
+    // 没有本地缓存时，自动拉取后端在线资源列表作为兜底显示
+    await this.loadBackendResources();
   }
 
   private initPlayer(): void {
@@ -298,6 +310,24 @@ export struct MediaModule {
         this.contentOffset = 0;
       }, 80);
     }, 120);
+  }
+
+  private async loadBackendResources(): Promise<void> {
+    try {
+      const response = await this.resourceService.getResources(this.activeTab === TabType.MUSIC ? 'music' : 'radio');
+      if (response.code === 200 && response.data) {
+        this.searchResults = response.data;
+        if (!this.currentItem && response.data.length > 0) {
+          this.currentItem = response.data[0];
+        }
+        this.statusText = `已获取 ${response.data.length} 条后端资源`;
+      } else {
+        this.searchResults = [];
+      }
+    } catch (err) {
+      this.searchResults = [];
+      console.error('[MediaModule] loadBackendResources failed:', JSON.stringify(err));
+    }
   }
 
   private async searchOnlineResources(): Promise<void> {
