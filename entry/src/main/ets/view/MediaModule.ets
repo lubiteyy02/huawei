@@ -1,29 +1,24 @@
 import { media } from '@kit.MediaKit';
 import { audio } from '@kit.AudioKit';
-import { avSession } from '@kit.AVSessionKit';
+import { MediaResourceService, MediaResourceItem } from '../services/MediaResourceService';
+import { CacheService } from '../services/CacheService';
 import { common } from '@kit.AbilityKit';
 
-export interface MediaItem {
+interface LocalMediaItem {
   id: number;
   title: string;
   artist: string;
   cover: string;
-  url: string;
+  source: string;
   tag: string;
-}
-
-enum MediaTab {
-  MUSIC = 0,
-  RADIO = 1,
-  VIDEO = 2
+  mediaType: 'music' | 'radio';
 }
 
 @Component
 export struct MediaModule {
   @Prop isPageVisible: boolean = true;
-
-  @State activeTab: MediaTab = MediaTab.MUSIC;
-  @State currentItem: MediaItem | null = null;
+  @State activeTab: 'music' | 'radio' = 'music';
+  @State currentItem: LocalMediaItem | MediaResourceItem | null = null;
   @State isPlaying: boolean = false;
   @State isLoading: boolean = false;
   @State currentTime: number = 0;
@@ -31,83 +26,79 @@ export struct MediaModule {
   @State progress: number = 0;
   @State statusText: string = '请选择内容播放';
   @State rotateAngle: number = 0;
+  @State searchKeyword: string = '';
+  @State showSearchPanel: boolean = false;
+  @State searchResults: MediaResourceItem[] = [];
+  @State localEmptyMessage: string = '';
 
   private avPlayer: media.AVPlayer | undefined;
-  private session: avSession.AVSession | undefined;
   private rotateTimer: number = -1;
   private progressTimer: number = -1;
+  private resourceService: MediaResourceService = MediaResourceService.getInstance();
+  private cacheService: CacheService = CacheService.getInstance();
 
-  private readonly musicList: MediaItem[] = [
-    { id: 1, title: 'Midnight City', artist: 'SoundHelix Demo', cover: 'https://images.pexels.com/photos/1389429/pexels-photo-1389429.jpeg?auto=compress&cs=tinysrgb&w=600', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3', tag: '在线音乐' },
-    { id: 2, title: 'Ocean Pulse', artist: 'SoundHelix Demo', cover: 'https://images.pexels.com/photos/167092/pexels-photo-167092.jpeg?auto=compress&cs=tinysrgb&w=600', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3', tag: '在线音乐' },
-    { id: 3, title: 'Shape of Air', artist: 'SoundHelix Demo', cover: 'https://images.pexels.com/photos/1763075/pexels-photo-1763075.jpeg?auto=compress&cs=tinysrgb&w=600', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3', tag: '在线音乐' }
+  private readonly musicItems: LocalMediaItem[] = [
+    { id: 1, title: '本地音乐一', artist: 'Rawfile 资源', cover: 'https://images.pexels.com/photos/1389429/pexels-photo-1389429.jpeg?auto=compress&cs=tinysrgb&w=600', source: 'rawfile:sample_music_1.mp3', tag: '离线音乐', mediaType: 'music' },
+    { id: 2, title: '本地音乐二', artist: 'Rawfile 资源', cover: 'https://images.pexels.com/photos/167092/pexels-photo-167092.jpeg?auto=compress&cs=tinysrgb&w=600', source: 'rawfile:sample_music_2.mp3', tag: '离线音乐', mediaType: 'music' }
   ];
 
-  private readonly radioList: MediaItem[] = [
-    { id: 101, title: 'Morning FM', artist: '新闻 / 交通 / 天气', cover: 'https://images.pexels.com/photos/164938/pexels-photo-164938.jpeg?auto=compress&cs=tinysrgb&w=600', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3', tag: '在线电台' },
-    { id: 102, title: 'Travel Radio', artist: '轻音乐 / 伴驾', cover: 'https://images.pexels.com/photos/3394650/pexels-photo-3394650.jpeg?auto=compress&cs=tinysrgb&w=600', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3', tag: '在线电台' },
-    { id: 103, title: 'City FM', artist: '本地资讯 / 路况', cover: 'https://images.pexels.com/photos/111288/pexels-photo-111288.jpeg?auto=compress&cs=tinysrgb&w=600', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3', tag: '在线电台' }
+  private readonly radioItems: LocalMediaItem[] = [
+    { id: 101, title: '晨间电台', artist: '本地电台占位', cover: 'https://images.pexels.com/photos/164938/pexels-photo-164938.jpeg?auto=compress&cs=tinysrgb&w=600', source: 'rawfile:radio_1.mp3', tag: '离线电台', mediaType: 'radio' }
   ];
-
-  private readonly videoList: MediaItem[] = [
-    { id: 201, title: 'Trip Memories', artist: '行车记录片段', cover: 'https://images.pexels.com/photos/276781/pexels-photo-276781.jpeg?auto=compress&cs=tinysrgb&w=600', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3', tag: '视频模拟' },
-    { id: 202, title: 'City View', artist: '风景影像模拟', cover: 'https://images.pexels.com/photos/210182/pexels-photo-210182.jpeg?auto=compress&cs=tinysrgb&w=600', url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3', tag: '视频模拟' }
-  ];
-
-  private getCurrentList(): MediaItem[] {
-    if (this.activeTab === MediaTab.RADIO) return this.radioList;
-    if (this.activeTab === MediaTab.VIDEO) return this.videoList;
-    return this.musicList;
-  }
 
   aboutToAppear(): void {
-    this.currentItem = this.getCurrentList()[0];
-    this.initMedia();
+    this.currentItem = this.getCurrentList()[0] || null;
+    this.initPlayer();
+    void this.checkLocalCacheAndLoad();
   }
 
   aboutToDisappear(): void {
     this.cleanup();
   }
 
-  private async initMedia(): Promise<void> {
-    try {
-      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      this.session = await avSession.createAVSession(context, 'CarMediaSession', 'audio');
-      await this.session.activate();
-      this.initPlayer();
-      this.statusText = '已就绪，选择一首开始播放';
-    } catch (err) {
-      console.error('[MediaModule] initMedia failed:', JSON.stringify(err));
-      this.statusText = '媒体模块初始化失败';
-    }
+  private getCurrentList(): Array<LocalMediaItem | MediaResourceItem> {
+    return this.activeTab === 'music' ? this.musicItems : this.radioItems;
   }
 
-  private ensurePlayerExists(): boolean {
-    return this.avPlayer !== undefined && this.avPlayer !== null;
+  private async checkLocalCacheAndLoad(): Promise<void> {
+    const cacheKey = this.activeTab === 'music' ? 'local_music_cache' : 'local_radio_cache';
+    const cached = await this.cacheService.get<Array<LocalMediaItem | MediaResourceItem>>(cacheKey);
+    if (!cached || cached.length === 0) {
+      this.localEmptyMessage = '没有音乐缓存';
+      this.statusText = '没有音乐缓存';
+      this.currentItem = null;
+      this.searchResults = [];
+      return;
+    }
+
+    this.localEmptyMessage = '';
+    this.currentItem = cached[0] || null;
+    this.statusText = '已加载缓存内容';
+    if (this.currentItem) {
+      await this.loadItem(this.currentItem, false);
+    }
   }
 
   private initPlayer(): void {
     if (this.avPlayer) {
       return;
     }
-    media.createAVPlayer().then((player) => {
+    media.createAVPlayer().then((player: media.AVPlayer) => {
       this.avPlayer = player;
       this.avPlayer.audioRendererInfo = {
         usage: audio.StreamUsage.STREAM_USAGE_MUSIC,
         rendererFlags: 0
       };
       this.registerPlayerCallbacks();
-      if (this.currentItem) {
-        this.avPlayer.url = this.currentItem.url;
-      }
     }).catch(() => {
-      console.error('[MediaModule] createAVPlayer failed');
       this.statusText = '播放器初始化失败';
     });
   }
 
   private registerPlayerCallbacks(): void {
-    if (!this.avPlayer) return;
+    if (!this.avPlayer) {
+      return;
+    }
 
     this.avPlayer.on('stateChange', async (state: media.AVPlayerState) => {
       try {
@@ -127,7 +118,7 @@ export struct MediaModule {
           this.statusText = '已暂停';
           this.stopAnimations();
         } else if (state === 'completed') {
-          this.playNext();
+          void this.playNext();
         }
       } catch (err) {
         console.error('[MediaModule] stateChange error:', JSON.stringify(err));
@@ -139,9 +130,8 @@ export struct MediaModule {
       this.progress = this.totalTime > 0 ? Math.min(100, (time / this.totalTime) * 100) : 0;
     });
 
-    this.avPlayer.on('error', (err) => {
-      console.error('[MediaModule] player error:', JSON.stringify(err));
-      this.statusText = '播放失败，请重试';
+    this.avPlayer.on('error', () => {
+      this.statusText = '播放失败，请检查资源';
       this.isPlaying = false;
       this.stopAnimations();
     });
@@ -154,17 +144,12 @@ export struct MediaModule {
     } catch (err) {
       console.error('[MediaModule] release failed:', JSON.stringify(err));
     }
-    try {
-      this.session?.destroy();
-    } catch (err) {
-      console.error('[MediaModule] session destroy failed:', JSON.stringify(err));
-    }
   }
 
   private startAnimations(): void {
     this.stopAnimations();
     this.rotateTimer = setInterval(() => {
-      this.rotateAngle = (this.rotateAngle + 1.5) % 360;
+      this.rotateAngle = (this.rotateAngle + 1.2) % 360;
     }, 30);
     this.progressTimer = setInterval(() => {
       if (this.isPlaying && this.totalTime > 0 && this.currentTime < this.totalTime) {
@@ -186,14 +171,16 @@ export struct MediaModule {
   }
 
   private formatTime(ms: number): string {
-    if (!ms || ms < 0) return '00:00';
+    if (!ms || ms < 0) {
+      return '00:00';
+    }
     const totalSeconds = Math.floor(ms / 1000);
     const min = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
     const sec = (totalSeconds % 60).toString().padStart(2, '0');
     return `${min}:${sec}`;
   }
 
-  private async loadItem(item: MediaItem, autoplay: boolean = false): Promise<void> {
+  private async loadItem(item: LocalMediaItem | MediaResourceItem, autoplay: boolean = false): Promise<void> {
     if (!this.avPlayer) {
       this.statusText = '播放器未就绪';
       return;
@@ -206,11 +193,21 @@ export struct MediaModule {
       this.totalTime = 0;
       this.progress = 0;
       this.rotateAngle = 0;
-      this.statusText = autoplay ? '正在播放...' : '已加载，点击播放';
       this.isPlaying = autoplay;
 
-      await this.avPlayer.reset();
-      this.avPlayer.url = item.url;
+      if (item.sourceType === 'online') {
+        await this.avPlayer.reset();
+        this.avPlayer.url = item.source;
+        this.statusText = autoplay ? '正在播放在线资源...' : '在线资源已加载';
+        if (autoplay) {
+          await this.avPlayer.play();
+        }
+        return;
+      }
+
+      this.statusText = '请先确认 rawfile 中存在对应离线资源';
+      this.localEmptyMessage = '没有音乐缓存';
+      this.isPlaying = false;
     } catch (err) {
       console.error('[MediaModule] loadItem failed:', JSON.stringify(err));
       this.statusText = '加载失败';
@@ -226,16 +223,16 @@ export struct MediaModule {
       return;
     }
 
+    if (this.currentItem.sourceType === 'local') {
+      this.statusText = '没有音乐缓存';
+      return;
+    }
+
     try {
       if (this.isPlaying) {
         await this.avPlayer.pause();
       } else {
-        if (this.totalTime === 0) {
-          this.isPlaying = true;
-          await this.avPlayer.play();
-        } else {
-          await this.avPlayer.play();
-        }
+        await this.avPlayer.play();
       }
     } catch (err) {
       console.error('[MediaModule] togglePlay failed:', JSON.stringify(err));
@@ -246,6 +243,9 @@ export struct MediaModule {
 
   private async playNext(): Promise<void> {
     const list = this.getCurrentList();
+    if (list.length === 0) {
+      return;
+    }
     const index = list.findIndex((i) => i.id === this.currentItem?.id);
     const next = list[(index + 1) % list.length];
     await this.loadItem(next, true);
@@ -253,70 +253,87 @@ export struct MediaModule {
 
   private async playPrev(): Promise<void> {
     const list = this.getCurrentList();
+    if (list.length === 0) {
+      return;
+    }
     const index = list.findIndex((i) => i.id === this.currentItem?.id);
     const prevIndex = index <= 0 ? list.length - 1 : index - 1;
     await this.loadItem(list[prevIndex], true);
   }
 
-  private switchTab(tab: MediaTab): void {
-    this.activeTab = tab;
-    const first = this.getCurrentList()[0];
-    if (first) {
-      void this.loadItem(first, false);
+  private switchTab(tab: 'music' | 'radio'): void {
+    if (this.activeTab === tab) {
+      return;
     }
+    this.activeTab = tab;
+    this.currentItem = this.getCurrentList()[0] || null;
+    this.statusText = '正在检查缓存...';
+    void this.checkLocalCacheAndLoad();
+  }
+
+  private async searchOnlineResources(): Promise<void> {
+    const keyword = this.searchKeyword.trim();
+    if (keyword === '') {
+      this.statusText = '请输入搜索关键词';
+      return;
+    }
+
+    this.isLoading = true;
+    const response = await this.resourceService.getResources(this.activeTab, keyword);
+    if (response.code === 200 && response.data) {
+      this.searchResults = response.data;
+      this.showSearchPanel = true;
+      this.statusText = `找到 ${response.data.length} 条在线资源`;
+    } else {
+      this.searchResults = [];
+      this.statusText = response.message || '未找到资源';
+    }
+    this.isLoading = false;
   }
 
   @Builder
-  private TabButton(title: string, tab: MediaTab) {
+  private PillButton(title: string, selected: boolean, onClickAction: () => void) {
     Button(title)
-      .height(40)
-      .padding({ left: 18, right: 18 })
-      .backgroundColor(this.activeTab === tab ? '#00E5FF' : 'rgba(255,255,255,0.08)')
-      .fontColor(this.activeTab === tab ? '#08111F' : '#FFFFFF')
+      .height(34)
+      .padding({ left: 14, right: 14 })
+      .backgroundColor(selected ? '#00E5FF' : 'rgba(255,255,255,0.08)')
+      .fontColor(selected ? '#08111F' : '#FFFFFF')
       .fontWeight(FontWeight.Medium)
-      .borderRadius(20)
-      .onClick(() => this.switchTab(tab))
+      .borderRadius(17)
+      .onClick(onClickAction)
   }
 
   @Builder
-  private MediaCard(item: MediaItem) {
+  private MediaCard(item: LocalMediaItem | MediaResourceItem) {
     Row() {
       Image(item.cover)
-        .width(74)
-        .height(74)
-        .borderRadius(18)
+        .width(62)
+        .height(62)
+        .borderRadius(16)
         .objectFit(ImageFit.Cover)
 
       Column() {
         Text(item.tag)
           .fontSize(10)
           .fontColor('#00E5FF')
-          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-          .backgroundColor('rgba(0,229,255,0.12)')
-          .borderRadius(10)
-
         Text(item.title)
-          .fontSize(16)
+          .fontSize(15)
           .fontWeight(FontWeight.Bold)
           .fontColor('#FFFFFF')
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .margin({ top: 8 })
-
         Text(item.artist)
-          .fontSize(12)
+          .fontSize(11)
           .fontColor('rgba(255,255,255,0.65)')
-          .margin({ top: 4 })
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
-      .margin({ left: 14 })
+      .margin({ left: 12 })
     }
     .width('100%')
-    .padding(14)
+    .padding(12)
     .backgroundColor('rgba(255,255,255,0.06)')
-    .borderRadius(22)
-    .border({ width: 1, color: 'rgba(255,255,255,0.08)' })
+    .borderRadius(18)
     .onClick(() => {
       void this.loadItem(item, false);
     })
@@ -324,159 +341,192 @@ export struct MediaModule {
 
   build() {
     Stack({ alignContent: Alignment.Bottom }) {
-      Column() {
-      }
-      .width('100%')
-      .height('100%')
-      .backgroundColor('#020617')
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#020617')
 
       Column() {
-        // 顶部标题
         Row() {
-          Column({ space: 4 }) {
+          Column({ space: 1 }) {
             Text('多媒体娱乐')
-              .fontSize(26)
-              .fontWeight(FontWeight.Bold)
-              .fontColor('#FFFFFF')
-            Text('在线音乐 · 电台收听 · 视频模拟播放')
-              .fontSize(12)
-              .fontColor('rgba(255,255,255,0.6)')
-          }
-          .alignItems(HorizontalAlign.Start)
-
-          Text(this.statusText)
-            .fontSize(12)
-            .fontColor('#00E5FF')
-            .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-            .backgroundColor('rgba(0,229,255,0.12)')
-            .borderRadius(999)
-        }
-        .width('100%')
-        .justifyContent(FlexAlign.SpaceBetween)
-        .padding({ left: 20, right: 20, top: 20, bottom: 12 })
-
-        // 切换标签
-        Row({ space: 12 }) {
-          this.TabButton('音乐', MediaTab.MUSIC)
-          this.TabButton('电台', MediaTab.RADIO)
-          this.TabButton('视频', MediaTab.VIDEO)
-        }
-        .width('100%')
-        .padding({ left: 20, right: 20, bottom: 12 })
-
-        // 当前封面区
-        Stack({ alignContent: Alignment.Center }) {
-          if (this.currentItem) {
-            Image(this.currentItem.cover)
-              .width(240)
-              .height(240)
-              .borderRadius(120)
-              .rotate({ angle: this.rotateAngle })
-              .objectFit(ImageFit.Cover)
-              .shadow({ radius: 30, color: 'rgba(0,0,0,0.45)', offsetY: 10 })
-
-            Circle({ width: 82, height: 82 })
-              .fill('rgba(8,17,31,0.92)')
-              .border({ width: 8, color: 'rgba(255,255,255,0.05)' })
-          }
-        }
-        .width('100%')
-        .height(290)
-        .margin({ top: 10 })
-
-        if (this.currentItem) {
-          Column({ space: 8 }) {
-            Text(this.currentItem.title)
               .fontSize(22)
               .fontWeight(FontWeight.Bold)
               .fontColor('#FFFFFF')
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-            Text(this.currentItem.artist)
-              .fontSize(14)
-              .fontColor('rgba(255,255,255,0.65)')
+            Text('先查缓存，再搜在线资源')
+              .fontSize(10)
+              .fontColor('rgba(255,255,255,0.55)')
+          }
+          .alignItems(HorizontalAlign.Start)
+
+          Button('搜索')
+            .height(34)
+            .fontSize(12)
+            .backgroundColor('#00E5FF')
+            .fontColor('#08111F')
+            .borderRadius(17)
+            .onClick(() => {
+              this.showSearchPanel = !this.showSearchPanel;
+            })
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.SpaceBetween)
+        .padding({ left: 18, right: 18, top: 10, bottom: 6 })
+
+        Row({ space: 10 }) {
+          this.PillButton('音乐', this.activeTab === 'music', () => this.switchTab('music'))
+          this.PillButton('电台', this.activeTab === 'radio', () => this.switchTab('radio'))
+        }
+        .width('100%')
+        .padding({ left: 18, right: 18, bottom: 8 })
+
+        if (this.showSearchPanel) {
+          Row() {
+            TextInput({ placeholder: '搜索在线资源，如：天气 / 交通 / 轻音乐' })
+              .layoutWeight(1)
+              .height(40)
+              .onChange((value: string) => {
+                this.searchKeyword = value;
+              })
+            Button('查找')
+              .height(40)
+              .margin({ left: 8 })
+              .backgroundColor('#00E5FF')
+              .fontColor('#08111F')
+              .borderRadius(20)
+              .onClick(() => {
+                void this.searchOnlineResources();
+              })
           }
           .width('100%')
-          .alignItems(HorizontalAlign.Center)
-          .margin({ top: 4 })
+          .padding({ left: 18, right: 18, bottom: 8 })
         }
 
-        // 进度与控制区
-        Column() {
-          Row() {
-            Text(this.formatTime(this.currentTime))
-              .fontSize(12)
-              .fontColor('rgba(255,255,255,0.65)')
-            Slider({ value: this.progress, min: 0, max: 100 })
-              .layoutWeight(1)
-              .margin({ left: 12, right: 12 })
-              .trackColor('rgba(255,255,255,0.10)')
-              .selectedColor('#00E5FF')
-            Text(this.formatTime(this.totalTime))
-              .fontSize(12)
-              .fontColor('rgba(255,255,255,0.65)')
+        Row() {
+          Stack({ alignContent: Alignment.Center }) {
+            if (this.currentItem) {
+              Image(this.currentItem.cover)
+                .width(120)
+                .height(120)
+                .borderRadius(18)
+                .rotate({ angle: this.rotateAngle })
+                .objectFit(ImageFit.Cover)
+            }
           }
-          .width('100%')
-          .margin({ bottom: 18 })
+          .width(132)
+          .height(132)
 
-          Row({ space: 22 }) {
+          Column() {
+            if (this.currentItem) {
+              Text(this.currentItem.title)
+                .fontSize(18)
+                .fontWeight(FontWeight.Bold)
+                .fontColor('#FFFFFF')
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+              Text(this.currentItem.artist)
+                .fontSize(12)
+                .fontColor('rgba(255,255,255,0.65)')
+                .margin({ top: 4 })
+            } else {
+              Text(this.localEmptyMessage || '没有音乐缓存')
+                .fontSize(16)
+                .fontColor('#FFFFFF')
+            }
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          .margin({ left: 12 })
+        }
+        .width('100%')
+        .padding(14)
+        .margin({ left: 18, right: 18, top: 2 })
+        .backgroundColor('rgba(255,255,255,0.06)')
+        .borderRadius(20)
+        .border({ width: 1, color: 'rgba(255,255,255,0.08)' })
+
+        Row() {
+          Row({ space: 10 }) {
             Button('⏮')
-              .width(58)
-              .height(58)
-              .borderRadius(29)
-              .fontSize(24)
+              .width(46)
+              .height(46)
+              .borderRadius(23)
               .backgroundColor('rgba(255,255,255,0.08)')
               .fontColor('#FFFFFF')
               .onClick(() => { void this.playPrev(); })
-
             Button(this.isPlaying ? '⏸' : '▶')
-              .width(82)
-              .height(82)
-              .borderRadius(41)
-              .fontSize(32)
+              .width(62)
+              .height(62)
+              .borderRadius(31)
               .backgroundColor('#00E5FF')
               .fontColor('#08111F')
               .fontWeight(FontWeight.Bold)
-              .shadow({ radius: 18, color: 'rgba(0,229,255,0.35)', offsetY: 8 })
               .onClick(() => { void this.togglePlay(); })
-
             Button('⏭')
-              .width(58)
-              .height(58)
-              .borderRadius(29)
-              .fontSize(24)
+              .width(46)
+              .height(46)
+              .borderRadius(23)
               .backgroundColor('rgba(255,255,255,0.08)')
               .fontColor('#FFFFFF')
               .onClick(() => { void this.playNext(); })
           }
-          .width('100%')
-          .justifyContent(FlexAlign.Center)
+
+          Column() {
+            Row() {
+              Text(this.formatTime(this.currentTime))
+                .fontSize(10)
+                .fontColor('rgba(255,255,255,0.55)')
+              Slider({ value: this.progress, min: 0, max: 100 })
+                .layoutWeight(1)
+                .margin({ left: 8, right: 8 })
+                .trackColor('rgba(255,255,255,0.10)')
+                .selectedColor('#00E5FF')
+              Text(this.formatTime(this.totalTime))
+                .fontSize(10)
+                .fontColor('rgba(255,255,255,0.55)')
+            }
+            .width('100%')
+
+            Text(this.statusText)
+              .fontSize(10)
+              .fontColor('rgba(255,255,255,0.55)')
+              .margin({ top: 4 })
+          }
+          .layoutWeight(1)
+          .margin({ left: 12 })
         }
         .width('100%')
-        .padding(20)
-        .margin({ top: 14 })
+        .padding({ left: 18, right: 18, top: 10, bottom: 10 })
+        .margin({ left: 18, right: 18, top: 10 })
         .backgroundColor('rgba(255,255,255,0.05)')
-        .backdropBlur(28)
-        .borderRadius(28)
-        .border({ width: 1, color: 'rgba(255,255,255,0.08)' })
+        .borderRadius(20)
 
-        // 列表
         Column() {
-          Row() {
-            Text(this.activeTab === MediaTab.MUSIC ? '在线音乐' : this.activeTab === MediaTab.RADIO ? '在线电台' : '视频模拟')
-              .fontSize(16)
-              .fontWeight(FontWeight.Bold)
-              .fontColor('#FFFFFF')
-            Text('点击任意条目切换')
+          Text(this.activeTab === 'music' ? '本地音乐缓存 / 在线资源' : '本地电台缓存 / 在线资源')
+            .fontSize(14)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#FFFFFF')
+            .margin({ bottom: 8 })
+
+          if (this.searchResults.length > 0) {
+            Text('在线搜索结果')
               .fontSize(12)
               .fontColor('rgba(255,255,255,0.55)')
-          }
-          .width('100%')
-          .justifyContent(FlexAlign.SpaceBetween)
-          .margin({ bottom: 12 })
+              .margin({ bottom: 6 })
 
-          List({ space: 12 }) {
-            ForEach(this.getCurrentList(), (item: MediaItem) => {
+            List({ space: 8 }) {
+              ForEach(this.searchResults, (item: MediaResourceItem) => {
+                ListItem() {
+                  this.MediaCard(item)
+                }
+              })
+            }
+            .width('100%')
+            .height('45%')
+          }
+
+          List({ space: 8 }) {
+            ForEach(this.getCurrentList(), (item: LocalMediaItem | MediaResourceItem) => {
               ListItem() {
                 this.MediaCard(item)
               }
@@ -487,7 +537,7 @@ export struct MediaModule {
         }
         .width('100%')
         .layoutWeight(1)
-        .padding({ left: 20, right: 20, top: 18, bottom: 20 })
+        .padding({ left: 18, right: 18, top: 10, bottom: 12 })
       }
       .width('100%')
       .height('100%')

@@ -7,6 +7,7 @@ import * as routePlanController from '../controllers/routePlanController';
 import * as locationController from '../controllers/locationController';
 import * as feedbackController from '../controllers/feedbackController';
 import * as frequentLocationController from '../controllers/frequentLocationController';
+import * as mediaController from '../controllers/mediaController';
 
 const router = express.Router();
 
@@ -63,5 +64,8 @@ router.get('/frequent-locations/stats', authMiddleware, frequentLocationControll
 router.get('/frequent-locations/:id', authMiddleware, frequentLocationController.getLocationDetail);
 router.put('/frequent-locations/:id', authMiddleware, frequentLocationController.updateLocation);
 router.delete('/frequent-locations/:id', authMiddleware, frequentLocationController.deleteLocation);
+
+// ========== 多媒体资源相关路由 ==========
+router.get('/media/resources', mediaController.getMediaResources);
 
 export default router;

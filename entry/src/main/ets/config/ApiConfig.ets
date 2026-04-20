@@ -28,6 +28,7 @@ interface ApiEndpoints {
   FEEDBACK: string;
   FEEDBACK_STATS: string;
   FEEDBACK_DETAIL: (id: number) => string;
+  MEDIA_RESOURCES: string;
 }
 
 /**
@@ -38,69 +39,50 @@ interface CacheExpireConfig {
   HISTORY: number;
   FREQUENT: number;
   USER_INFO: number;
+  MEDIA: number;
 }
 
 export class ApiConfig {
-  // 环境配置
   static readonly ENV: 'development' | 'production' = 'development';
-  
-  // 开发环境基础URL
-  // 注意：鸿蒙真机/模拟器里 localhost 指的是设备自身，不是电脑
-  // 开发环境请填电脑局域网地址；生产环境请填正式域名
   static readonly DEV_HOST = 'http://192.168.26.191:3002';
   static readonly PROD_HOST = 'https://your-domain.com';
   static readonly BASE_URL = ApiConfig.ENV === 'development'
     ? `${ApiConfig.DEV_HOST}/api/v1`
     : `${ApiConfig.PROD_HOST}/api/v1`;
-  
-  // 超时配置（毫秒）
-  static readonly TIMEOUT = 30000;  // 30秒
-  
-  // Token存储key
+  static readonly TIMEOUT = 30000;
   static readonly TOKEN_KEY = 'auth_token';
   static readonly USER_KEY = 'user_info';
-  
-  // API端点
+
   static readonly ENDPOINTS: ApiEndpoints = {
-    // 认证
     AUTH_REGISTER: '/auth/register',
     AUTH_LOGIN: '/auth/login',
     AUTH_PROFILE: '/auth/profile',
-    
-    // 收藏
     FAVORITES: '/favorites',
     FAVORITE_DETAIL: (id: number): string => `/favorites/${id}`,
-    
-    // 导航历史
     NAVIGATION_HISTORY: '/navigation/history',
     NAVIGATION_HISTORY_DETAIL: (id: number): string => `/navigation/history/${id}`,
-    
-    // 常去地点
     FREQUENT_LOCATIONS: '/frequent-locations',
     FREQUENT_LOCATIONS_VISIT: '/frequent-locations/visit',
     FREQUENT_LOCATIONS_RECOMMENDED: '/frequent-locations/recommended',
     FREQUENT_LOCATIONS_STATS: '/frequent-locations/stats',
     FREQUENT_LOCATIONS_DETAIL: (id: number): string => `/frequent-locations/${id}`,
-    
-    // 位置共享
     LOCATION: '/location',
     LOCATION_USER: (userId: number): string => `/location/${userId}`,
     LOCATION_SHARING_TOGGLE: '/location/sharing/toggle',
     LOCATION_SHARING: '/location/sharing',
     LOCATION_SHARING_DETAIL: (id: number): string => `/location/sharing/${id}`,
     LOCATION_NEARBY: '/location/nearby',
-    
-    // 反馈
     FEEDBACK: '/feedback',
     FEEDBACK_STATS: '/feedback/stats',
-    FEEDBACK_DETAIL: (id: number): string => `/feedback/${id}`
+    FEEDBACK_DETAIL: (id: number): string => `/feedback/${id}`,
+    MEDIA_RESOURCES: '/media/resources'
   };
-  
-  // 缓存配置（毫秒）
+
   static readonly CACHE_EXPIRE_TIME: CacheExpireConfig = {
-    FAVORITES: 3600000,      // 1小时
-    HISTORY: 3600000,        // 1小时
-    FREQUENT: 7200000,       // 2小时
-    USER_INFO: 86400000      // 24小时
+    FAVORITES: 3600000,
+    HISTORY: 3600000,
+    FREQUENT: 7200000,
+    USER_INFO: 86400000,
+    MEDIA: 86400000
   };
 }
