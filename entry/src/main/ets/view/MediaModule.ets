@@ -82,6 +82,10 @@ export struct MediaModule {
     }
   }
 
+  private ensurePlayerExists(): boolean {
+    return this.avPlayer !== undefined && this.avPlayer !== null;
+  }
+
   private initPlayer(): void {
     if (this.avPlayer) {
       return;
@@ -96,8 +100,8 @@ export struct MediaModule {
       if (this.currentItem) {
         this.avPlayer.url = this.currentItem.url;
       }
-    }).catch((err) => {
-      console.error('[MediaModule] createAVPlayer failed:', JSON.stringify(err));
+    }).catch(() => {
+      console.error('[MediaModule] createAVPlayer failed');
       this.statusText = '播放器初始化失败';
     });
   }
@@ -321,13 +325,10 @@ export struct MediaModule {
   build() {
     Stack({ alignContent: Alignment.Bottom }) {
       Column() {
-        LinearGradient({
-          angle: 135,
-          colors: [['#09111F', 0], ['#102A43', 0.45], ['#020617', 1]]
-        })
-        .width('100%')
-        .height('100%')
       }
+      .width('100%')
+      .height('100%')
+      .backgroundColor('#020617')
 
       Column() {
         // 顶部标题
