@@ -4,6 +4,7 @@
  */
 import http from '@ohos.net.http';
 import preferences from '@ohos.data.preferences';
+import { common } from '@kit.AbilityKit';
 import { ApiResponse } from '../models/BackendModels';
 import { ApiConfig } from '../config/ApiConfig';
 
@@ -15,10 +16,12 @@ export class HttpService {
   private token: string = '';
   private preferencesInstance: preferences.Preferences | null = null;
   private readonly PREFERENCES_NAME = 'app_auth';
-  
+  private initialized: boolean = false;
+  private initPromise: Promise<void>;
+
   private constructor() {
     // 从本地存储加载token
-    this.initPreferences();
+    this.initPromise = this.initPreferences();
   }
   
   static getInstance(): HttpService {
@@ -32,13 +35,26 @@ export class HttpService {
    * 初始化Preferences
    */
   private async initPreferences(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
     try {
-      const context = getContext();
+      const context = getContext() as common.UIAbilityContext;
       this.preferencesInstance = await preferences.getPreferences(context, this.PREFERENCES_NAME);
       await this.loadToken();
+      this.initialized = true;
       console.log('[HttpService] Preferences初始化成功');
     } catch (err) {
       console.error('[HttpService] Preferences初始化失败:', JSON.stringify(err));
+      throw new Error(`HttpService初始化失败: ${JSON.stringify(err)}`);
+    }
+  }
+
+  async ensureInitialized(): Promise<void> {
+    try {
+      await this.initPromise;
+    } catch (err) {
+      console.error('[HttpService] 初始化等待失败:', JSON.stringify(err));
     }
   }
   
@@ -46,6 +62,7 @@ export class HttpService {
    * 设置认证token
    */
   async setToken(token: string): Promise<void> {
+    await this.ensureInitialized();
     this.token = token;
     await this.saveToken(token);
   }
@@ -53,7 +70,8 @@ export class HttpService {
   /**
    * 获取token
    */
-  getToken(): string {
+  async getToken(): Promise<string> {
+    await this.ensureInitialized();
     return this.token;
   }
   
@@ -61,6 +79,7 @@ export class HttpService {
    * 清除token
    */
   async clearToken(): Promise<void> {
+    await this.ensureInitialized();
     this.token = '';
     try {
       if (this.preferencesInstance) {
@@ -114,8 +133,23 @@ export class HttpService {
     data?: Object,
     needAuth: boolean = true
   ): Promise<ApiResponse<T>> {
+    await this.ensureInitialized();
+
     return new Promise((resolve, reject) => {
       const httpRequest = http.createHttp();
+      let settled = false;
+      const finish = <TValue>(value: TValue, isResolve: boolean = true): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (isResolve) {
+          resolve(value as ApiResponse<T>);
+        } else {
+          reject(value);
+        }
+        httpRequest.destroy();
+      };
       
       const fullUrl = `${ApiConfig.BASE_URL}${url}`;
       console.log(`[HttpService] ========== 请求详情 ==========`);
@@ -123,6 +157,8 @@ export class HttpService {
       console.log(`[HttpService] BASE_URL: ${ApiConfig.BASE_URL}`);
       console.log(`[HttpService] 路径: ${url}`);
       console.log(`[HttpService] 完整URL: ${fullUrl}`);
+      console.log(`[HttpService] 是否需要认证: ${needAuth}`);
+      console.log(`[HttpService] Token存在: ${!!this.token}`);
       console.log(`[HttpService] ================================`);
       
       const headers: Record<string, string> = {
@@ -155,13 +191,14 @@ export class HttpService {
         if (err) {
           console.error('[HttpService] ========== 错误详情 ==========');
           console.error('[HttpService] 请求失败:', JSON.stringify(err));
+          console.error('[HttpService] 请求URL:', fullUrl);
+          console.error('[HttpService] 请求方法:', method);
           console.error('[HttpService] ================================');
           const errorMessage = this.getErrorMessage(err);
-          reject({
+          finish({
             code: -1,
             message: errorMessage
-          });
-          httpRequest.destroy();
+          } as ApiResponse<T>, false);
           return;
         }
         
@@ -173,6 +210,7 @@ export class HttpService {
           console.log(`[HttpService] HTTP状态码: ${responseCode}`);
           console.log(`[HttpService] 响应内容: ${resultString}`);
           console.log(`[HttpService] 响应头: ${JSON.stringify(data.header)}`);
+          console.log(`[HttpService] 响应URL: ${fullUrl}`);
           console.log(`[HttpService] ================================`);
           
           // 尝试解析响应体
@@ -182,38 +220,34 @@ export class HttpService {
           } catch (parseErr) {
             console.error('[HttpService] 响应解析失败:', JSON.stringify(parseErr));
             // 如果解析失败，使用HTTP状态码生成错误信息
-            reject({
+            finish({
               code: responseCode,
               message: this.getHttpStatusMessage(responseCode)
-            });
-            httpRequest.destroy();
+            } as ApiResponse<T>, false);
             return;
           }
           
           // 处理HTTP状态码
           if (responseCode !== 200 && responseCode !== 201) {
             // 返回后端的实际错误信息
-            reject(response);
-            httpRequest.destroy();
+            finish(response, false);
             return;
           }
           
           // 处理401未授权
           if (response.code === 401) {
             console.log('[HttpService] Token无效，清除本地token');
-            this.clearToken();
+            void this.clearToken();
           }
           
           console.log(`[HttpService] 请求成功: ${response.code} ${response.message}`);
-          resolve(response);
+          finish(response, true);
         } catch (parseErr) {
           console.error('[HttpService] 响应解析失败:', JSON.stringify(parseErr));
-          reject({
+          finish({
             code: -1,
             message: '响应解析失败'
-          });
-        } finally {
-          httpRequest.destroy();
+          } as ApiResponse<T>, false);
         }
       });
     });

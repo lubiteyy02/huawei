@@ -32,11 +32,23 @@ export async function getFavorites(req: Request, res: Response) {
     sql += ' ORDER BY created_at DESC';
     
     const favorites = await query<Favorite[]>(sql, params);
-    
+
+    const formattedFavorites = favorites.map(item => ({
+      id: item.id,
+      userId: item.user_id,
+      name: item.name,
+      address: item.address,
+      latitude: item.latitude,
+      longitude: item.longitude,
+      category: item.category,
+      icon: item.icon,
+      createdAt: item.created_at
+    }));
+
     res.json({
       code: 200,
       message: '获取成功',
-      data: favorites
+      data: formattedFavorites
     });
   } catch (error) {
     console.error('Get favorites error:', error);
@@ -69,7 +81,7 @@ export async function addFavorite(req: Request, res: Response) {
     }
     
     // 验证参数
-    if (!name || !address || !latitude || !longitude) {
+    if (!name || !address || latitude === undefined || latitude === null || longitude === undefined || longitude === null) {
       console.error('❌ 缺少必要参数:', { name, address, latitude, longitude });
       return res.status(400).json({
         code: 400,
@@ -112,10 +124,9 @@ export async function addFavorite(req: Request, res: Response) {
     });
   } catch (error) {
     console.error('❌ Add favorite error:', error);
-    console.error('错误堆栈:', error instanceof Error ? error.stack : 'No stack trace');
     res.status(500).json({
       code: 500,
-      message: '服务器错误: ' + (error instanceof Error ? error.message : String(error))
+      message: '服务器错误'
     });
   }
 }

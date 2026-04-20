@@ -40,7 +40,7 @@ export async function updateLocation(req: Request, res: Response) {
     } = req.body;
     
     // 验证参数
-    if (!latitude || !longitude) {
+    if (latitude === undefined || latitude === null || longitude === undefined || longitude === null) {
       return res.status(400).json({
         code: 400,
         message: '缺少必要参数'
@@ -313,7 +313,7 @@ export async function getNearbySharedUsers(req: Request, res: Response) {
     const userId = req.userId;
     const { latitude, longitude, radius = 5000 } = req.query; // radius单位：米
     
-    if (!latitude || !longitude) {
+    if (latitude === undefined || latitude === null || longitude === undefined || longitude === null) {
       return res.status(400).json({
         code: 400,
         message: '缺少必要参数'

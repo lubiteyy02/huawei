@@ -35,7 +35,7 @@ export class FavoriteService {
       console.log('[FavoriteService] 获取收藏列表, category:', category);
       
       // 检查是否登录
-      const token = this.httpService.getToken();
+      const token = await this.httpService.getToken();
       if (!token) {
         return {
           code: 401,
@@ -84,7 +84,7 @@ export class FavoriteService {
       console.log('[FavoriteService] 完整数据:', JSON.stringify(place));
       
       // 检查是否登录
-      const token = this.httpService.getToken();
+      const token = await this.httpService.getToken();
       console.log('[FavoriteService] Token存在:', !!token);
       if (!token) {
         return {
@@ -124,7 +124,7 @@ export class FavoriteService {
       console.log('[FavoriteService] 更新收藏:', id);
       
       // 检查是否登录
-      const token = this.httpService.getToken();
+      const token = await this.httpService.getToken();
       if (!token) {
         return {
           code: 401,
@@ -158,7 +158,7 @@ export class FavoriteService {
       console.log('[FavoriteService] 删除收藏:', id);
       
       // 检查是否登录
-      const token = this.httpService.getToken();
+      const token = await this.httpService.getToken();
       if (!token) {
         return {
           code: 401,

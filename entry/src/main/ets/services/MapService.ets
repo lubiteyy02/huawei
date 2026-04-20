@@ -142,22 +142,10 @@ export class MapService {
   
   /**
    * 获取当前位置
-   * 使用IP定位，失败时使用默认坐标
+   * 直接使用默认坐标，不再优先尝试IP定位
    */
   async getCurrentLocation(): Promise<Location> {
-    try {
-      console.log('[MapService] 开始IP定位...');
-      const location = await this.amapService.getLocationByIP();
-      if (location) {
-        console.log('[MapService] IP定位成功:', location.latitude, location.longitude);
-        return location;
-      }
-    } catch (err) {
-      console.error('[MapService] IP定位失败:', err);
-    }
-    
-    // IP定位失败，使用武汉默认坐标
-    console.warn('[MapService] IP定位失败，使用默认坐标');
+    console.log('[MapService] 使用默认起点坐标');
     return {
       latitude: 30.486874173982763,
       longitude: 114.309994670642,

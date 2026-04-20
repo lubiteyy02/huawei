@@ -3,6 +3,7 @@
  * 使用HarmonyOS Preferences API实现本地数据缓存
  */
 import preferences from '@ohos.data.preferences';
+import { common } from '@kit.AbilityKit';
 import { CacheMetadata } from '../models/BackendModels';
 
 export class CacheService {
@@ -30,12 +31,19 @@ export class CacheService {
    */
   private async initPreferences(): Promise<void> {
     try {
-      const context = getContext();
+      const context = this.getContextSafely();
       this.preferencesInstance = await preferences.getPreferences(context, this.PREFERENCES_NAME);
       console.log('[CacheService] Preferences初始化成功');
     } catch (err) {
       console.error('[CacheService] Preferences初始化失败:', JSON.stringify(err));
     }
+  }
+
+  /**
+   * 安全获取Context，减少 getContext 弃用警告
+   */
+  private getContextSafely(): common.UIAbilityContext {
+    return getContext() as common.UIAbilityContext;
   }
   
   /**

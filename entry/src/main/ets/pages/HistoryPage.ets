@@ -29,7 +29,7 @@ struct HistoryPage {
           .backgroundColor(Color.Transparent)
           .fontColor('#333333')
           .onClick(() => {
-            router.back()
+            router.back({ url: 'pages/Index' })
           })
         
         Text('导航历史')
@@ -225,6 +225,9 @@ struct HistoryPage {
       if (response.code === 200 && response.data) {
         this.historyList = response.data.list
         this.hasMore = this.historyList.length < response.data.total
+      } else if (response.code === 401) {
+        this.errorMessage = '请先登录'
+        router.push({ url: 'pages/LoginPage' })
       } else {
         this.errorMessage = response.message || '加载失败'
       }
@@ -266,17 +269,17 @@ struct HistoryPage {
    * 再次导航
    */
   navigateAgain(item: NavigationHistory) {
-    // 使用 router 参数传递导航目的地数据
-    router.back({
-      url: 'pages/Index',
-      params: {
-        navigationDestination: {
-          name: item.endName,
-          address: item.endAddress,
-          latitude: item.endLat,
-          longitude: item.endLng
-        }
-      }
+    // 使用 AppStorage 传递导航目的地，确保首页能稳定接收到
+    AppStorage.setOrCreate('shouldSwitchToNavigation', true)
+    AppStorage.setOrCreate('navigationDestination', {
+      name: item.endName,
+      address: item.endAddress,
+      latitude: item.endLat,
+      longitude: item.endLng
+    })
+
+    router.replace({
+      url: 'pages/Index'
     })
   }
   

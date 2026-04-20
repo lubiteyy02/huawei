@@ -22,7 +22,7 @@ export async function recordVisit(req: Request, res: Response) {
     const { name, address, latitude, longitude, timePattern } = req.body;
     
     // 验证参数
-    if (!name || !latitude || !longitude) {
+    if (!name || latitude === undefined || latitude === null || longitude === undefined || longitude === null) {
       return res.status(400).json({
         code: 400,
         message: '缺少必要参数'

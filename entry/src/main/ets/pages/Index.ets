@@ -175,11 +175,15 @@ struct Index {
     if (navDest) {
       // 清除AppStorage中的参数
       AppStorage.delete('navigationDestination');
-      // 切换到导航Tab
-      this.currentIndex = 1;
-      this.controller.changeIndex(1);
-      // 设置导航目的地
-      this.navigationDestination = navDest;
+      // 先清空再设置，确保导航模块能感知到变化
+      this.navigationDestination = null;
+      setTimeout(() => {
+        this.currentIndex = 1;
+        this.controller.changeIndex(1);
+        setTimeout(() => {
+          this.navigationDestination = navDest;
+        }, 150);
+      }, 50);
     }
   }
 

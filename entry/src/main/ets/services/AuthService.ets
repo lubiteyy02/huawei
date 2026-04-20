@@ -2,6 +2,7 @@
  * 认证服务 - 管理用户认证、注册、登录和登出
  */
 import preferences from '@ohos.data.preferences';
+import { common } from '@kit.AbilityKit';
 import { HttpService } from './HttpService';
 import { 
   ApiResponse, 
@@ -39,13 +40,20 @@ export class AuthService {
    */
   private async initPreferences(): Promise<void> {
     try {
-      const context = getContext();
+      const context = this.getContextSafely();
       this.preferencesInstance = await preferences.getPreferences(context, this.PREFERENCES_NAME);
       await this.loadUserInfo();
       console.log('[AuthService] Preferences初始化成功');
     } catch (err) {
       console.error('[AuthService] Preferences初始化失败:', JSON.stringify(err));
     }
+  }
+
+  /**
+   * 安全获取Context，减少 getContext 弃用警告
+   */
+  private getContextSafely(): common.UIAbilityContext {
+    return getContext() as common.UIAbilityContext;
   }
 
   /**
@@ -79,7 +87,10 @@ export class AuthService {
       return response;
     } catch (err) {
       console.error('[AuthService] 注册失败:', JSON.stringify(err));
-      return err as ApiResponse<UserInfo>;
+      return {
+        code: -1,
+        message: JSON.stringify(err) || '请求失败'
+      } as ApiResponse<UserInfo>;
     }
   }
   
@@ -110,7 +121,10 @@ export class AuthService {
       return response;
     } catch (err) {
       console.error('[AuthService] 登录失败:', err);
-      return err as ApiResponse<UserInfo>;
+      return {
+        code: -1,
+        message: `登录请求失败: ${JSON.stringify(err)}`
+      } as ApiResponse<UserInfo>;
     }
   }
   
@@ -134,7 +148,10 @@ export class AuthService {
       return response;
     } catch (err) {
       console.error('[AuthService] 获取用户信息失败:', err);
-      return err as ApiResponse<UserInfo>;
+      return {
+        code: -1,
+        message: `获取用户信息失败: ${JSON.stringify(err)}`
+      } as ApiResponse<UserInfo>;
     }
   }
   
@@ -172,7 +189,10 @@ export class AuthService {
       return response;
     } catch (err) {
       console.error('[AuthService] 更新用户信息失败:', err);
-      return err as ApiResponse<void>;
+      return {
+        code: -1,
+        message: `更新用户信息失败: ${JSON.stringify(err)}`
+      } as ApiResponse<void>;
     }
   }
   
@@ -203,7 +223,7 @@ export class AuthService {
    * 检查登录状态
    */
   async isLoggedIn(): Promise<boolean> {
-    const token = this.httpService.getToken();
+    const token = await this.httpService.getToken();
     return token !== '' && token !== null && token !== undefined;
   }
   

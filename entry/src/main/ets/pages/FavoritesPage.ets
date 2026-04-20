@@ -27,7 +27,7 @@ struct FavoritesPage {
           .backgroundColor(Color.Transparent)
           .fontColor('#333333')
           .onClick(() => {
-            router.back()
+            router.back({ url: 'pages/Index' })
           })
         
         Text('我的收藏')
@@ -172,6 +172,9 @@ struct FavoritesPage {
       
       if (response.code === 200 && response.data) {
         this.favorites = response.data
+      } else if (response.code === 401) {
+        this.errorMessage = '请先登录'
+        router.push({ url: 'pages/LoginPage' })
       } else {
         this.errorMessage = response.message || '加载失败'
       }
@@ -191,16 +194,20 @@ struct FavoritesPage {
     console.log('[FavoritesPage] 导航到:', item.name);
     console.log('[FavoritesPage] 坐标:', item.latitude, item.longitude);
     
-    // 使用 router 参数传递数据（更可靠）
-    console.log('[FavoritesPage] 通过 router 参数传递导航目的地');
-    router.back({
-      url: 'pages/Index',
-      params: {
-        action: 'navigate',
-        destination: item
-      }
+    // 统一使用 AppStorage 传递导航目的地，保证首页和导航模块都能稳定感知变化
+    AppStorage.setOrCreate('shouldSwitchToNavigation', true);
+    AppStorage.setOrCreate('navigationDestination', {
+      name: item.name,
+      address: item.address,
+      latitude: item.latitude,
+      longitude: item.longitude
     });
-    console.log('[FavoritesPage] ========== router.back() 已调用 ==========');
+    console.log('[FavoritesPage] 已写入 AppStorage 导航目的地');
+    
+    router.replace({
+      url: 'pages/Index'
+    });
+    console.log('[FavoritesPage] ========== 已跳转到首页 ==========');
   }
   
   /**

@@ -1,6 +1,6 @@
 /**
  * 导航服务 - 管理导航状态和逻辑
- * 使用IP定位（不支持实时追踪）
+ * 使用默认起点坐标作为导航起点
  */
 import { MapService, Location, RouteInfo } from './MapService';
 
@@ -48,20 +48,13 @@ export class NavigationService {
    */
   async startNavigation(destination: Location): Promise<void> {
     try {
-      // 获取当前位置（IP定位）
-      let currentLocation: Location;
-      try {
-        currentLocation = await this.mapService.getCurrentLocation();
-        console.log('[NavigationService] 获取到当前位置:', currentLocation.latitude, currentLocation.longitude);
-      } catch (err) {
-        console.warn('[NavigationService] 获取当前位置失败，使用默认位置:', String(err));
-        currentLocation = {
-          latitude: 30.486874173982763,
-          longitude: 114.309994670642
-        };
-      }
+      // 直接使用默认起点坐标，不再依赖定位优先级逻辑
+      const currentLocation: Location = {
+        latitude: 30.486874173982763,
+        longitude: 114.309994670642
+      };
       
-      console.log('[NavigationService] 起点:', currentLocation.latitude, currentLocation.longitude);
+      console.log('[NavigationService] 默认起点:', currentLocation.latitude, currentLocation.longitude);
       console.log('[NavigationService] 终点:', destination.latitude, destination.longitude);
       
       // 更新状态为规划中
@@ -94,7 +87,7 @@ export class NavigationService {
         nextInstruction: route.steps[0]?.instruction || '开始导航'
       });
       
-      console.log('[NavigationService] 导航已启动（IP定位，无实时追踪）');
+      console.log('[NavigationService] 导航已启动（默认起点，无实时追踪）');
       
     } catch (err) {
       console.error('Start navigation error:', err);
@@ -138,7 +131,10 @@ export class NavigationService {
     if (!this.navigationInfo) return;
     
     try {
-      const currentLocation = await this.mapService.getCurrentLocation();
+      const currentLocation: Location = {
+        latitude: 30.486874173982763,
+        longitude: 114.309994670642
+      };
       const route = await this.mapService.planRoute(currentLocation, this.navigationInfo.destination, 0);
       
       this.mapService.clearOverlays();

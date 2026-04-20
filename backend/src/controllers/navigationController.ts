@@ -98,7 +98,7 @@ export async function saveNavigationHistory(req: Request, res: Response) {
     } = req.body;
     
     // 验证参数
-    if (!endName || !endAddress || !endLat || !endLng) {
+    if (!endName || !endAddress || endLat === undefined || endLat === null || endLng === undefined || endLng === null) {
       return res.status(400).json({
         code: 400,
         message: '缺少必要参数'

@@ -93,7 +93,7 @@ struct LoginPage {
         .fontColor('#333333')
         .enabled(!this.isLoading)
         .onClick(() => {
-          router.pushUrl({ url: 'pages/RegisterPage' })
+          router.push({ url: 'pages/RegisterPage' })
         })
     }
     .width('100%')
@@ -131,7 +131,7 @@ struct LoginPage {
       if (response.code === 200) {
         // 登录成功，跳转到主页面
         console.log('[LoginPage] 登录成功')
-        router.replaceUrl({ url: 'pages/Index' })
+        router.replace({ url: 'pages/Index' })
       } else {
         // 登录失败，显示错误信息
         this.errorMessage = response.message || '登录失败'

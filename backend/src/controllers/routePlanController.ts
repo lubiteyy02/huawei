@@ -131,7 +131,7 @@ export async function saveRoutePlan(req: Request, res: Response) {
     } = req.body;
     
     // 验证参数
-    if (!startName || !startLat || !startLng || !endName || !endLat || !endLng) {
+    if (!startName || startLat === undefined || startLat === null || startLng === undefined || startLng === null || !endName || endLat === undefined || endLat === null || endLng === undefined || endLng === null) {
       return res.status(400).json({
         code: 400,
         message: '缺少必要参数'

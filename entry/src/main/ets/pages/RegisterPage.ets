@@ -24,7 +24,7 @@ struct RegisterPage {
           .backgroundColor(Color.Transparent)
           .fontColor('#333333')
           .onClick(() => {
-            router.back()
+            router.back({ url: 'pages/LoginPage' })
           })
       }
       .width('100%')
@@ -190,7 +190,7 @@ struct RegisterPage {
       if (response.code === 200) {
         // 注册成功，自动登录并跳转到主页面
         console.log('[RegisterPage] 注册成功')
-        router.replaceUrl({ url: 'pages/Index' })
+        router.replace({ url: 'pages/Index' })
       } else {
         // 注册失败，显示错误信息
         this.errorMessage = response.message || '注册失败'

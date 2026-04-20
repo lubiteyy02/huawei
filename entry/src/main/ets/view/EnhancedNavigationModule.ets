@@ -1,7 +1,7 @@
 /**
  * 增强版导航模块
  * 集成完整的导航功能：定位、路径规划、导航指引、POI搜索
- * 使用IP定位（简单可靠）
+ * 使用默认定位（模拟器/开发环境稳定可用）
  */
 import { webview } from '@kit.ArkWeb';
 import { MapService, Location, POIResult } from '../services/MapService';
@@ -59,7 +59,7 @@ export struct EnhancedNavigationModule {
     
     // 检查是否有外部传入的导航目的地
     if (this.externalDestination) {
-      this.handleExternalDestination();
+      this.onDestinationChange();
     }
   }
   
@@ -68,6 +68,11 @@ export struct EnhancedNavigationModule {
    */
   onDestinationChange() {
     if (this.externalDestination) {
+      this.isNavigating = false;
+      this.navigationInfo = null;
+      this.remainingDistance = '';
+      this.remainingTime = '';
+      this.nextInstruction = '';
       this.handleExternalDestination();
     }
   }
@@ -93,7 +98,7 @@ export struct EnhancedNavigationModule {
       console.log('[Navigation] 地图已加载,立即启动导航');
       // 延迟一下,确保WebView完全准备好
       setTimeout(() => {
-        this.startNavigation(destination);
+        this.startNavigation(destination, this.externalDestination?.name || this.externalDestination?.address || '外部目的地');
       }, 500);
     } else {
       console.log('[Navigation] 等待地图加载...');
@@ -107,7 +112,7 @@ export struct EnhancedNavigationModule {
           clearInterval(checkInterval);
           // 延迟一下,确保WebView完全准备好
           setTimeout(() => {
-            this.startNavigation(destination);
+            this.startNavigation(destination, this.externalDestination?.name || this.externalDestination?.address || '外部目的地');
           }, 500);
         } else if (retryCount >= maxRetries) {
           console.error('[Navigation] 等待地图加载超时');
@@ -122,32 +127,24 @@ export struct EnhancedNavigationModule {
   }
   
   /**
-   * IP定位
+   * 默认定位
    */
-  async startIPLocation() {
+  async startDefaultLocation() {
     try {
-      console.log('[Navigation] 开始IP定位...');
-      this.addressText = "IP定位中...";
+      console.log('[Navigation] 使用默认定位...');
+      this.addressText = "默认位置(武汉)";
       
-      const location = await this.mapService.getCurrentLocation();
-      
-      this.latitude = location.latitude;
-      this.longitude = location.longitude;
-      this.addressText = location.address ? `IP定位 (${location.address})` : "默认位置(武汉)";
-      
-      console.log('[Navigation] IP定位完成:', this.latitude, this.longitude);
-      
-      // 更新地图标记
-      const currentLocation: Location = {
+      const defaultLocation: Location = {
         latitude: this.latitude,
         longitude: this.longitude
       };
-      this.mapService.addCurrentLocationMarker(currentLocation);
-      this.mapService.moveToLocation(currentLocation, this.zoomLevel);
       
+      this.mapService.addCurrentLocationMarker(defaultLocation);
+      this.mapService.moveToLocation(defaultLocation, this.zoomLevel);
+      console.log('[Navigation] 默认定位完成:', this.latitude, this.longitude);
     } catch (err) {
-      console.error('[Navigation] IP定位失败:', err);
-      this.addressText = "定位失败,使用默认位置";
+      console.error('[Navigation] 默认定位失败:', err);
+      this.addressText = "默认定位失败";
     }
   }
   
@@ -171,9 +168,9 @@ export struct EnhancedNavigationModule {
       console.log('[Navigation] 地图初始化完成');
     }, 300);
     
-    // 启动IP定位
+    // 启动默认定位
     setTimeout(() => {
-      this.startIPLocation();
+      this.startDefaultLocation();
     }, 500);
   }
   
@@ -210,13 +207,17 @@ export struct EnhancedNavigationModule {
   /**
    * 开始导航
    */
-  async startNavigation(destination: Location) {
+  async startNavigation(destination: Location, destinationName?: string) {
     try {
       await this.navigationService.startNavigation(destination);
       this.isNavigating = true;
       this.showSearchPanel = false;
+      if (destinationName) {
+        await this.saveNavigationHistory(destination, destinationName);
+      }
     } catch (err) {
       console.error('Start navigation error:', err);
+      await this.safeToast('导航启动失败，请重试');
     }
   }
   
@@ -289,7 +290,7 @@ export struct EnhancedNavigationModule {
    * 选择POI并导航
    */
   selectPOI(poi: POIResult) {
-    this.startNavigation(poi.location);
+    this.startNavigation(poi.location, poi.name);
   }
   
   /**
@@ -306,10 +307,7 @@ export struct EnhancedNavigationModule {
       
       if (!isLoggedIn) {
         console.log('[Navigation] 未登录，提示用户登录');
-        promptAction.showToast({
-          message: '请先登录',
-          duration: 2000
-        });
+        await this.safeToast('请先登录');
         return;
       }
       
@@ -326,24 +324,15 @@ export struct EnhancedNavigationModule {
       
       if (response.code === 200) {
         console.log('[Navigation] 收藏成功');
-        promptAction.showToast({
-          message: '收藏成功',
-          duration: 2000
-        });
+        await this.safeToast('收藏成功');
       } else {
         console.error('[Navigation] 收藏失败:', response.message);
-        promptAction.showToast({
-          message: response.message || '收藏失败',
-          duration: 2000
-        });
+        await this.safeToast(response.message || '收藏失败');
       }
     } catch (err) {
       console.error('[Navigation] 收藏异常 - 类型:', typeof err);
       console.error('[Navigation] 收藏异常 - 详情:', JSON.stringify(err));
-      promptAction.showToast({
-        message: '收藏失败，请稍后重试',
-        duration: 2000
-      });
+      await this.safeToast('收藏失败，请稍后重试');
     }
   }
   
@@ -761,8 +750,6 @@ export struct EnhancedNavigationModule {
         .borderRadius(18)
         .onClick(() => {
           this.selectPOI(poi);
-          // 保存导航历史
-          this.saveNavigationHistory(poi.location, poi.name);
         })
     }
     .width('100%')
@@ -786,5 +773,16 @@ export struct EnhancedNavigationModule {
       .backgroundColor('rgba(30, 41, 59, 0.9)')
       .shadow({ radius: 10, color: 'rgba(0,0,0,0.3)' })
       .onClick(action)
+  }
+
+  private async safeToast(message: string): Promise<void> {
+    try {
+      promptAction.showToast({
+        message,
+        duration: 2000
+      });
+    } catch (err) {
+      console.error('[Navigation] Toast显示失败:', JSON.stringify(err));
+    }
   }
 }

@@ -44,10 +44,14 @@ export class ApiConfig {
   // 环境配置
   static readonly ENV: 'development' | 'production' = 'development';
   
-  // 基础URL
-  static readonly BASE_URL = ApiConfig.ENV === 'development' 
-    ? 'http://192.168.6.191:3000/api/v1'
-    : 'https://your-api.com/api/v1';
+  // 开发环境基础URL
+  // 注意：鸿蒙真机/模拟器里 localhost 指的是设备自身，不是电脑
+  // 开发环境请填电脑局域网地址；生产环境请填正式域名
+  static readonly DEV_HOST = 'http://192.168.26.191:3002';
+  static readonly PROD_HOST = 'https://your-domain.com';
+  static readonly BASE_URL = ApiConfig.ENV === 'development'
+    ? `${ApiConfig.DEV_HOST}/api/v1`
+    : `${ApiConfig.PROD_HOST}/api/v1`;
   
   // 超时配置（毫秒）
   static readonly TIMEOUT = 30000;  // 30秒

@@ -3,13 +3,14 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import routes from './routes';
 import { testConnection } from './config/database';
+import { getLocalIPv4 } from './utils/network';
 
 // 加载环境变量
 dotenv.config();
 
 const app = express();
 
-const PORT = process.env.PORT || 3000;
+const PORT: number = Number(process.env.PORT || 3000);
 
 // 中间件
 app.use(cors());  // 允许跨域
@@ -62,14 +63,15 @@ async function startServer() {
     }
     
     // 启动HTTP服务
-    app.listen(PORT, () => {
+    app.listen(PORT, '0.0.0.0', () => {
       console.log('');
       console.log('🚀 ========================================');
       console.log(`🚀 车载导航系统后端服务已启动`);
       console.log(`🚀 运行环境: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`🚀 服务地址: http://localhost:${PORT}`);
-      console.log(`🚀 API文档: http://localhost:${PORT}/api/v1`);
-      console.log(`🚀 健康检查: http://localhost:${PORT}/health`);
+      const localIP = getLocalIPv4();
+      console.log(`🚀 服务地址: http://${localIP}:${PORT}`);
+      console.log(`🚀 API文档: http://${localIP}:${PORT}/api/v1`);
+      console.log(`🚀 健康检查: http://${localIP}:${PORT}/health`);
       console.log('🚀 ========================================');
       console.log('');
     });

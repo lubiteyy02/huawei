@@ -34,7 +34,7 @@ struct UserCenterPage {
           .backgroundColor(Color.Transparent)
           .fontColor('#FFFFFF')
           .onClick(() => {
-            router.back()
+            router.back({ url: 'pages/Index' })
           })
         
         Text('我的')
@@ -98,7 +98,7 @@ struct UserCenterPage {
                 .height(40)
                 .backgroundColor('#4A90E2')
                 .onClick(() => {
-                  router.pushUrl({ url: 'pages/LoginPage' })
+                  router.push({ url: 'pages/LoginPage' })
                 })
               
               Button('注册')
@@ -107,7 +107,7 @@ struct UserCenterPage {
                 .height(40)
                 .backgroundColor('#666666')
                 .onClick(() => {
-                  router.pushUrl({ url: 'pages/RegisterPage' })
+                  router.push({ url: 'pages/RegisterPage' })
                 })
             }
           }
@@ -120,14 +120,22 @@ struct UserCenterPage {
       // 功能列表
       Column() {
         // 我的收藏
-        this.MenuItem('⭐', '我的收藏', () => {
-          router.pushUrl({ url: 'pages/FavoritesPage' })
+        this.MenuItem('⭐', '我的收藏', async () => {
+          if (!await this.authService.isLoggedIn()) {
+            router.push({ url: 'pages/LoginPage' })
+            return
+          }
+          router.push({ url: 'pages/FavoritesPage' })
         })
         
         Divider().color('#333333')
         
         // 导航历史
-        this.MenuItem('📍', '导航历史', () => {
+        this.MenuItem('📍', '导航历史', async () => {
+          if (!await this.authService.isLoggedIn()) {
+            router.push({ url: 'pages/LoginPage' })
+            return
+          }
           router.pushUrl({ url: 'pages/HistoryPage' })
         })
         
@@ -152,7 +160,7 @@ struct UserCenterPage {
   }
   
   @Builder
-  MenuItem(icon: string, title: string, onClick: () => void) {
+  MenuItem(icon: string, title: string, onClick: () => void | Promise<void>) {
     Row() {
       Text(icon)
         .fontSize(24)
@@ -169,6 +177,8 @@ struct UserCenterPage {
     }
     .width('100%')
     .height(56)
-    .onClick(onClick)
+    .onClick(() => {
+      void onClick()
+    })
   }
 }

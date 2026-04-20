@@ -10,3 +10,6 @@
 /.clang-tidy
 **/.test
 /.appanalyzer
+backend/.env
+backend/dist
+backend/node_modules
