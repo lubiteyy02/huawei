@@ -45,7 +45,7 @@ interface CacheExpireConfig {
 export class ApiConfig {
   static readonly ENV: 'development' | 'production' = 'development';
   static readonly DEV_HOST = 'http://192.168.26.191:3002';
-  static readonly PROD_HOST = 'https://your-domain.com';
+  static readonly PROD_HOST = 'https://192.168.26.191:3002';
   static readonly BASE_URL = ApiConfig.ENV === 'development'
     ? `${ApiConfig.DEV_HOST}/api/v1`
     : `${ApiConfig.PROD_HOST}/api/v1`;
