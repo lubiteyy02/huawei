@@ -2,7 +2,6 @@ import { media } from '@kit.MediaKit';
 import { audio } from '@kit.AudioKit';
 import { MediaResourceService, MediaResourceItem } from '../services/MediaResourceService';
 import { CacheService } from '../services/CacheService';
-import { common } from '@kit.AbilityKit';
 
 interface LocalMediaItem {
   id: number;
@@ -14,10 +13,16 @@ interface LocalMediaItem {
   mediaType: 'music' | 'radio';
 }
 
+enum TabType {
+  MUSIC = 0,
+  RADIO = 1
+}
+
 @Component
 export struct MediaModule {
   @Prop isPageVisible: boolean = true;
-  @State activeTab: 'music' | 'radio' = 'music';
+
+  @State activeTab: TabType = TabType.MUSIC;
   @State currentItem: LocalMediaItem | MediaResourceItem | null = null;
   @State isPlaying: boolean = false;
   @State isLoading: boolean = false;
@@ -26,10 +31,17 @@ export struct MediaModule {
   @State progress: number = 0;
   @State statusText: string = '请选择内容播放';
   @State rotateAngle: number = 0;
-  @State searchKeyword: string = '';
   @State showSearchPanel: boolean = false;
+  @State searchKeyword: string = '';
   @State searchResults: MediaResourceItem[] = [];
-  @State localEmptyMessage: string = '';
+  @State emptyHint: string = '';
+  @State viewToken: number = 0;
+  @State contentOpacity: number = 1;
+  @State contentOffset: number = 0;
+  @State activeAccent: string = '#38BDF8';
+  @State activeFill: string = 'rgba(56,189,248,0.18)';
+  @State activeTabBorder: string = '#38BDF8';
+  @State activeGlow: string = 'rgba(56,189,248,0.22)';
 
   private avPlayer: media.AVPlayer | undefined;
   private rotateTimer: number = -1;
@@ -47,9 +59,8 @@ export struct MediaModule {
   ];
 
   aboutToAppear(): void {
-    this.currentItem = this.getCurrentList()[0] || null;
     this.initPlayer();
-    void this.checkLocalCacheAndLoad();
+    void this.loadLocalCache();
   }
 
   aboutToDisappear(): void {
@@ -57,26 +68,17 @@ export struct MediaModule {
   }
 
   private getCurrentList(): Array<LocalMediaItem | MediaResourceItem> {
-    return this.activeTab === 'music' ? this.musicItems : this.radioItems;
+    return this.activeTab === TabType.MUSIC ? this.musicItems : this.radioItems;
   }
 
-  private async checkLocalCacheAndLoad(): Promise<void> {
-    const cacheKey = this.activeTab === 'music' ? 'local_music_cache' : 'local_radio_cache';
-    const cached = await this.cacheService.get<Array<LocalMediaItem | MediaResourceItem>>(cacheKey);
-    if (!cached || cached.length === 0) {
-      this.localEmptyMessage = '没有音乐缓存';
-      this.statusText = '没有音乐缓存';
-      this.currentItem = null;
-      this.searchResults = [];
-      return;
-    }
-
-    this.localEmptyMessage = '';
-    this.currentItem = cached[0] || null;
-    this.statusText = '已加载缓存内容';
-    if (this.currentItem) {
-      await this.loadItem(this.currentItem, false);
-    }
+  private async loadLocalCache(): Promise<void> {
+    const key = this.activeTab === TabType.MUSIC ? 'local_music_cache' : 'local_radio_cache';
+    const cached = await this.cacheService.get<Array<LocalMediaItem | MediaResourceItem>>(key);
+    this.emptyHint = (!cached || cached.length === 0) ? '没有音乐缓存' : '';
+    this.currentItem = cached && cached.length > 0 ? cached[0] : this.getCurrentList()[0];
+    this.statusText = this.emptyHint ? this.emptyHint : '已准备就绪';
+    this.viewToken++;
+    this.updateAccent();
   }
 
   private initPlayer(): void {
@@ -195,9 +197,10 @@ export struct MediaModule {
       this.rotateAngle = 0;
       this.isPlaying = autoplay;
 
-      if (item.sourceType === 'online') {
+      if ((item as MediaResourceItem).source !== undefined) {
+        const onlineItem = item as MediaResourceItem;
         await this.avPlayer.reset();
-        this.avPlayer.url = item.source;
+        this.avPlayer.url = onlineItem.source;
         this.statusText = autoplay ? '正在播放在线资源...' : '在线资源已加载';
         if (autoplay) {
           await this.avPlayer.play();
@@ -206,7 +209,7 @@ export struct MediaModule {
       }
 
       this.statusText = '请先确认 rawfile 中存在对应离线资源';
-      this.localEmptyMessage = '没有音乐缓存';
+      this.emptyHint = '没有音乐缓存';
       this.isPlaying = false;
     } catch (err) {
       console.error('[MediaModule] loadItem failed:', JSON.stringify(err));
@@ -223,7 +226,7 @@ export struct MediaModule {
       return;
     }
 
-    if (this.currentItem.sourceType === 'local') {
+    if ((this.currentItem as MediaResourceItem).source === undefined) {
       this.statusText = '没有音乐缓存';
       return;
     }
@@ -261,14 +264,40 @@ export struct MediaModule {
     await this.loadItem(list[prevIndex], true);
   }
 
-  private switchTab(tab: 'music' | 'radio'): void {
+  private updateAccent(): void {
+    if (this.activeTab === TabType.MUSIC) {
+      this.activeAccent = '#38BDF8';
+      this.activeFill = 'rgba(56,189,248,0.22)';
+      this.activeTabBorder = '#38BDF8';
+      this.activeGlow = 'rgba(56,189,248,0.26)';
+    } else {
+      this.activeAccent = '#818CF8';
+      this.activeFill = 'rgba(129,140,248,0.22)';
+      this.activeTabBorder = '#818CF8';
+      this.activeGlow = 'rgba(129,140,248,0.26)';
+    }
+  }
+
+  private async switchTab(tab: TabType): Promise<void> {
     if (this.activeTab === tab) {
       return;
     }
-    this.activeTab = tab;
-    this.currentItem = this.getCurrentList()[0] || null;
-    this.statusText = '正在检查缓存...';
-    void this.checkLocalCacheAndLoad();
+
+    this.contentOpacity = 0;
+    this.contentOffset = 14;
+    setTimeout(() => {
+      this.activeTab = tab;
+      this.updateAccent();
+      this.currentItem = this.getCurrentList()[0] || null;
+      this.statusText = tab === TabType.MUSIC ? '当前为音乐模式' : '当前为电台模式';
+      this.searchResults = [];
+      this.emptyHint = '';
+      void this.loadLocalCache();
+      setTimeout(() => {
+        this.contentOpacity = 1;
+        this.contentOffset = 0;
+      }, 80);
+    }, 120);
   }
 
   private async searchOnlineResources(): Promise<void> {
@@ -279,27 +308,34 @@ export struct MediaModule {
     }
 
     this.isLoading = true;
-    const response = await this.resourceService.getResources(this.activeTab, keyword);
-    if (response.code === 200 && response.data) {
-      this.searchResults = response.data;
-      this.showSearchPanel = true;
-      this.statusText = `找到 ${response.data.length} 条在线资源`;
-    } else {
+    try {
+      const response = await this.resourceService.getResources(this.activeTab === TabType.MUSIC ? 'music' : 'radio', keyword);
+      if (response.code === 200 && response.data) {
+        this.searchResults = response.data;
+        this.statusText = `找到 ${response.data.length} 条在线资源`;
+      } else {
+        this.searchResults = [];
+        this.statusText = response.message || '未找到资源';
+      }
+    } catch (err) {
       this.searchResults = [];
-      this.statusText = response.message || '未找到资源';
+      this.statusText = `搜索失败: ${JSON.stringify(err)}`;
+    } finally {
+      this.isLoading = false;
     }
-    this.isLoading = false;
   }
 
   @Builder
   private PillButton(title: string, selected: boolean, onClickAction: () => void) {
     Button(title)
-      .height(34)
-      .padding({ left: 14, right: 14 })
-      .backgroundColor(selected ? '#00E5FF' : 'rgba(255,255,255,0.08)')
+      .height(36)
+      .padding({ left: 16, right: 16 })
+      .backgroundColor(selected ? this.activeFill : 'rgba(255,255,255,0.08)')
       .fontColor(selected ? '#08111F' : '#FFFFFF')
       .fontWeight(FontWeight.Medium)
-      .borderRadius(17)
+      .border({ width: selected ? 1.2 : 0.6, color: selected ? this.activeTabBorder : 'rgba(255,255,255,0.12)' })
+      .borderRadius(18)
+      .shadow(selected ? { radius: 14, color: this.activeGlow, offsetY: 4 } : undefined)
       .onClick(onClickAction)
   }
 
@@ -307,24 +343,31 @@ export struct MediaModule {
   private MediaCard(item: LocalMediaItem | MediaResourceItem) {
     Row() {
       Image(item.cover)
-        .width(62)
-        .height(62)
+        .width(72)
+        .height(72)
         .borderRadius(16)
         .objectFit(ImageFit.Cover)
 
       Column() {
         Text(item.tag)
           .fontSize(10)
-          .fontColor('#00E5FF')
+          .fontColor(this.activeAccent)
+          .padding({ left: 8, right: 8, top: 3, bottom: 3 })
+          .backgroundColor(this.activeFill)
+          .borderRadius(8)
+
         Text(item.title)
           .fontSize(15)
           .fontWeight(FontWeight.Bold)
           .fontColor('#FFFFFF')
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .margin({ top: 6 })
+
         Text(item.artist)
           .fontSize(11)
           .fontColor('rgba(255,255,255,0.65)')
+          .margin({ top: 4 })
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
@@ -332,8 +375,8 @@ export struct MediaModule {
     }
     .width('100%')
     .padding(12)
-    .backgroundColor('rgba(255,255,255,0.06)')
-    .borderRadius(18)
+    .backgroundColor('rgba(255,255,255,0.05)')
+    .borderRadius(16)
     .onClick(() => {
       void this.loadItem(item, false);
     })
@@ -344,200 +387,252 @@ export struct MediaModule {
       Column()
         .width('100%')
         .height('100%')
-        .backgroundColor('#020617')
+        .backgroundColor('#0B1220')
 
       Column() {
         Row() {
-          Column({ space: 1 }) {
+          Column({ space: 2 }) {
             Text('多媒体娱乐')
-              .fontSize(22)
+              .fontSize(21)
               .fontWeight(FontWeight.Bold)
               .fontColor('#FFFFFF')
-            Text('先查缓存，再搜在线资源')
+            Text('音乐主功能 · 电台独立 · 在线搜索')
               .fontSize(10)
               .fontColor('rgba(255,255,255,0.55)')
           }
           .alignItems(HorizontalAlign.Start)
 
-          Button('搜索')
+          Button(this.showSearchPanel ? '关闭搜索' : '搜索')
             .height(34)
             .fontSize(12)
-            .backgroundColor('#00E5FF')
+            .backgroundColor('#38BDF8')
             .fontColor('#08111F')
             .borderRadius(17)
+            .margin({ top: 24, bottom: 2 })
             .onClick(() => {
               this.showSearchPanel = !this.showSearchPanel;
             })
         }
         .width('100%')
         .justifyContent(FlexAlign.SpaceBetween)
-        .padding({ left: 18, right: 18, top: 10, bottom: 6 })
+        .padding({ left: 18, right: 18, top: 10, bottom: 8 })
 
         Row({ space: 10 }) {
-          this.PillButton('音乐', this.activeTab === 'music', () => this.switchTab('music'))
-          this.PillButton('电台', this.activeTab === 'radio', () => this.switchTab('radio'))
+          this.PillButton('音乐', this.activeTab === TabType.MUSIC, () => { void this.switchTab(TabType.MUSIC); })
+          this.PillButton('电台', this.activeTab === TabType.RADIO, () => { void this.switchTab(TabType.RADIO); })
         }
         .width('100%')
         .padding({ left: 18, right: 18, bottom: 8 })
 
+        Text(this.emptyHint)
+          .fontSize(12)
+          .fontColor(this.activeAccent)
+          .padding({ left: 18, right: 18, bottom: 6 })
+
         if (this.showSearchPanel) {
-          Row() {
-            TextInput({ placeholder: '搜索在线资源，如：天气 / 交通 / 轻音乐' })
-              .layoutWeight(1)
-              .height(40)
-              .onChange((value: string) => {
-                this.searchKeyword = value;
-              })
-            Button('查找')
-              .height(40)
-              .margin({ left: 8 })
-              .backgroundColor('#00E5FF')
-              .fontColor('#08111F')
-              .borderRadius(20)
+          Stack() {
+            Rect()
+              .width('100%')
+              .height('100%')
+              .fill('rgba(3, 7, 18, 0.30)')
               .onClick(() => {
-                void this.searchOnlineResources();
+                this.showSearchPanel = false;
               })
+
+            Column() {
+              Text('在线资源搜索')
+                .fontSize(14)
+                .fontColor('#FFFFFF')
+                .fontWeight(FontWeight.Bold)
+                .margin({ bottom: 10 })
+
+              Row() {
+                TextInput({ placeholder: '搜索在线资源，如：天气 / 交通 / 轻音乐' })
+                  .layoutWeight(1)
+                  .height(42)
+                  .backgroundColor('rgba(11, 18, 32, 0.96)')
+                  .fontColor('#FFFFFF')
+                  .placeholderColor('rgba(255,255,255,0.45)')
+                  .borderRadius(21)
+                  .padding({ left: 12, right: 12 })
+                  .onChange((value: string) => {
+                    this.searchKeyword = value;
+                  })
+
+                Button('查找')
+                  .height(42)
+                  .margin({ left: 8 })
+                  .backgroundColor('#38BDF8')
+                  .fontColor('#08111F')
+                  .borderRadius(21)
+                  .onClick(() => {
+                    void this.searchOnlineResources();
+                  })
+              }
+              .width('100%')
+            }
+            .width('92%')
+            .padding(14)
+            .backgroundColor('rgba(9, 15, 28, 0.98)')
+            .borderRadius(20)
+            .shadow({ radius: 16, color: 'rgba(0,0,0,0.35)', offsetY: 8 })
           }
           .width('100%')
-          .padding({ left: 18, right: 18, bottom: 8 })
+          .height('100%')
+          .padding({ top: 138, left: 0, right: 0, bottom: 0 })
+          .position({ x: 0, y: 0 })
+          .zIndex(9999)
         }
-
-        Row() {
-          Stack({ alignContent: Alignment.Center }) {
-            if (this.currentItem) {
-              Image(this.currentItem.cover)
-                .width(120)
-                .height(120)
-                .borderRadius(18)
-                .rotate({ angle: this.rotateAngle })
-                .objectFit(ImageFit.Cover)
-            }
-          }
-          .width(132)
-          .height(132)
-
-          Column() {
-            if (this.currentItem) {
-              Text(this.currentItem.title)
-                .fontSize(18)
-                .fontWeight(FontWeight.Bold)
-                .fontColor('#FFFFFF')
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-              Text(this.currentItem.artist)
-                .fontSize(12)
-                .fontColor('rgba(255,255,255,0.65)')
-                .margin({ top: 4 })
-            } else {
-              Text(this.localEmptyMessage || '没有音乐缓存')
-                .fontSize(16)
-                .fontColor('#FFFFFF')
-            }
-          }
-          .layoutWeight(1)
-          .alignItems(HorizontalAlign.Start)
-          .margin({ left: 12 })
-        }
-        .width('100%')
-        .padding(14)
-        .margin({ left: 18, right: 18, top: 2 })
-        .backgroundColor('rgba(255,255,255,0.06)')
-        .borderRadius(20)
-        .border({ width: 1, color: 'rgba(255,255,255,0.08)' })
-
-        Row() {
-          Row({ space: 10 }) {
-            Button('⏮')
-              .width(46)
-              .height(46)
-              .borderRadius(23)
-              .backgroundColor('rgba(255,255,255,0.08)')
-              .fontColor('#FFFFFF')
-              .onClick(() => { void this.playPrev(); })
-            Button(this.isPlaying ? '⏸' : '▶')
-              .width(62)
-              .height(62)
-              .borderRadius(31)
-              .backgroundColor('#00E5FF')
-              .fontColor('#08111F')
-              .fontWeight(FontWeight.Bold)
-              .onClick(() => { void this.togglePlay(); })
-            Button('⏭')
-              .width(46)
-              .height(46)
-              .borderRadius(23)
-              .backgroundColor('rgba(255,255,255,0.08)')
-              .fontColor('#FFFFFF')
-              .onClick(() => { void this.playNext(); })
-          }
-
-          Column() {
-            Row() {
-              Text(this.formatTime(this.currentTime))
-                .fontSize(10)
-                .fontColor('rgba(255,255,255,0.55)')
-              Slider({ value: this.progress, min: 0, max: 100 })
-                .layoutWeight(1)
-                .margin({ left: 8, right: 8 })
-                .trackColor('rgba(255,255,255,0.10)')
-                .selectedColor('#00E5FF')
-              Text(this.formatTime(this.totalTime))
-                .fontSize(10)
-                .fontColor('rgba(255,255,255,0.55)')
-            }
-            .width('100%')
-
-            Text(this.statusText)
-              .fontSize(10)
-              .fontColor('rgba(255,255,255,0.55)')
-              .margin({ top: 4 })
-          }
-          .layoutWeight(1)
-          .margin({ left: 12 })
-        }
-        .width('100%')
-        .padding({ left: 18, right: 18, top: 10, bottom: 10 })
-        .margin({ left: 18, right: 18, top: 10 })
-        .backgroundColor('rgba(255,255,255,0.05)')
-        .borderRadius(20)
 
         Column() {
-          Text(this.activeTab === 'music' ? '本地音乐缓存 / 在线资源' : '本地电台缓存 / 在线资源')
-            .fontSize(14)
-            .fontWeight(FontWeight.Bold)
-            .fontColor('#FFFFFF')
-            .margin({ bottom: 8 })
+          Row() {
+            Stack({ alignContent: Alignment.Center }) {
+              if (this.currentItem) {
+                Image(this.currentItem.cover)
+                  .width(112)
+                  .height(112)
+                  .borderRadius(18)
+                  .rotate({ angle: this.rotateAngle })
+                  .objectFit(ImageFit.Cover)
+              }
+            }
+            .width(126)
+            .height(126)
 
-          if (this.searchResults.length > 0) {
-            Text('在线搜索结果')
-              .fontSize(12)
-              .fontColor('rgba(255,255,255,0.55)')
-              .margin({ bottom: 6 })
+            Column() {
+              if (this.currentItem) {
+                Text(this.currentItem.title)
+                  .fontSize(18)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor('#FFFFFF')
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                Text(this.currentItem.artist)
+                  .fontSize(12)
+                  .fontColor('rgba(255,255,255,0.65)')
+                  .margin({ top: 4 })
+              } else {
+                Text(this.emptyHint || '没有音乐缓存')
+                  .fontSize(16)
+                  .fontColor('#FFFFFF')
+              }
+            }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Start)
+            .margin({ left: 12 })
+          }
+          .width('100%')
+          .padding(14)
+          .backgroundColor('rgba(255,255,255,0.05)')
+          .borderRadius(18)
+          .border({ width: 1, color: 'rgba(255,255,255,0.08)' })
+          .margin({ left: 18, right: 18, top: 2 })
+          .opacity(this.contentOpacity)
+          .translate({ x: 0, y: this.contentOffset })
+
+          Row() {
+            Row({ space: 10 }) {
+              Button('⏮')
+                .width(46)
+                .height(46)
+                .borderRadius(23)
+                .backgroundColor('rgba(255,255,255,0.08)')
+                .fontColor('#FFFFFF')
+                .onClick(() => { void this.playPrev(); })
+
+              Button(this.isPlaying ? '⏸' : '▶')
+                .width(62)
+                .height(62)
+                .borderRadius(31)
+                .backgroundColor('#38BDF8')
+                .fontColor('#08111F')
+                .fontWeight(FontWeight.Bold)
+                .onClick(() => { void this.togglePlay(); })
+
+              Button('⏭')
+                .width(46)
+                .height(46)
+                .borderRadius(23)
+                .backgroundColor('rgba(255,255,255,0.08)')
+                .fontColor('#FFFFFF')
+                .onClick(() => { void this.playNext(); })
+            }
+            .alignItems(VerticalAlign.Center)
+
+            Column() {
+              Row() {
+                Text(this.formatTime(this.currentTime))
+                  .fontSize(10)
+                  .fontColor('rgba(255,255,255,0.55)')
+                Slider({ value: this.progress, min: 0, max: 100 })
+                  .layoutWeight(1)
+                  .margin({ left: 8, right: 8 })
+                  .trackColor('rgba(255,255,255,0.10)')
+                  .selectedColor('#38BDF8')
+                Text(this.formatTime(this.totalTime))
+                  .fontSize(10)
+                  .fontColor('rgba(255,255,255,0.55)')
+              }
+              .width('100%')
+
+              Text(this.statusText)
+                .fontSize(10)
+                .fontColor('rgba(255,255,255,0.55)')
+                .margin({ top: 4 })
+            }
+            .layoutWeight(1)
+            .margin({ left: 12 })
+          }
+          .width('100%')
+          .padding({ left: 18, right: 18, top: 10, bottom: 10 })
+          .margin({ left: 18, right: 18, top: 10 })
+          .backgroundColor('rgba(255,255,255,0.04)')
+          .borderRadius(18)
+          .opacity(this.contentOpacity)
+          .translate({ x: 0, y: this.contentOffset })
+
+          Column() {
+            Text(this.activeTab === TabType.MUSIC ? '音乐列表' : '电台列表')
+              .fontSize(14)
+              .fontWeight(FontWeight.Bold)
+              .fontColor('#FFFFFF')
+              .margin({ bottom: 8 })
+
+            if (this.searchResults.length > 0) {
+              Text('在线搜索结果')
+                .fontSize(11)
+                .fontColor('rgba(255,255,255,0.55)')
+                .margin({ bottom: 6 })
+
+              List({ space: 8 }) {
+                ForEach(this.searchResults, (item: MediaResourceItem) => {
+                  ListItem() {
+                    this.MediaCard(item)
+                  }
+                })
+              }
+              .width('100%')
+              .height('40%')
+            }
 
             List({ space: 8 }) {
-              ForEach(this.searchResults, (item: MediaResourceItem) => {
+              ForEach(this.getCurrentList(), (item: LocalMediaItem | MediaResourceItem) => {
                 ListItem() {
                   this.MediaCard(item)
                 }
               })
             }
             .width('100%')
-            .height('45%')
-          }
-
-          List({ space: 8 }) {
-            ForEach(this.getCurrentList(), (item: LocalMediaItem | MediaResourceItem) => {
-              ListItem() {
-                this.MediaCard(item)
-              }
-            })
+            .layoutWeight(1)
           }
           .width('100%')
           .layoutWeight(1)
+          .padding({ left: 18, right: 18, top: 10, bottom: 12 })
+          .opacity(this.contentOpacity)
+          .translate({ x: 0, y: this.contentOffset })
         }
         .width('100%')
         .layoutWeight(1)
-        .padding({ left: 18, right: 18, top: 10, bottom: 12 })
       }
       .width('100%')
       .height('100%')
