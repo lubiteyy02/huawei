@@ -3,7 +3,7 @@ import { audio } from '@kit.AudioKit';
 import { common } from '@kit.AbilityKit';
 import { CacheService } from '../services/CacheService';
 
-interface LocalMediaItem {
+class LocalMediaItem {
   id: number;
   title: string;
   artist: string;
@@ -11,6 +11,38 @@ interface LocalMediaItem {
   source: string;
   tag: string;
   mediaType: 'music' | 'radio';
+
+  constructor(id: number, title: string, artist: string, cover: string, source: string, tag: string, mediaType: 'music' | 'radio') {
+    this.id = id;
+    this.title = title;
+    this.artist = artist;
+    this.cover = cover;
+    this.source = source;
+    this.tag = tag;
+    this.mediaType = mediaType;
+  }
+}
+
+class LyricLine {
+  time: number;
+  text: string;
+
+  constructor(time: number, text: string) {
+    this.time = time;
+    this.text = text;
+  }
+}
+
+class LyricRenderLine {
+  time: number;
+  text: string;
+  isActive: boolean;
+
+  constructor(time: number, text: string, isActive: boolean) {
+    this.time = time;
+    this.text = text;
+    this.isActive = isActive;
+  }
 }
 
 enum TabType {
@@ -48,15 +80,41 @@ export struct MediaModule {
   private rotateTimer: number = -1;
   private cacheService: CacheService = CacheService.getInstance();
   private rawFileDescriptors: Map<string, media.AVFileDescriptor | null> = new Map();
+  private lyricScroller: Scroller = new Scroller();
 
   private readonly musicItems: LocalMediaItem[] = [
-    { id: 1, title: '发如雪', artist: '本地缓存', cover: 'https://images.pexels.com/photos/1389429/pexels-photo-1389429.jpeg?auto=compress&cs=tinysrgb&w=600', source: 'rawfile:sample_music_1.mp3', tag: '离线音乐', mediaType: 'music' },
-    { id: 2, title: '听妈妈的话', artist: '本地缓存', cover: 'https://images.pexels.com/photos/167092/pexels-photo-167092.jpeg?auto=compress&cs=tinysrgb&w=600', source: 'rawfile:sample_music_2.mp3', tag: '离线音乐', mediaType: 'music' },
- { id: 3, title: '以父之名', artist: '本地缓存', cover: 'https://images.pexels.com/photos/167092/pexels-photo-167092.jpeg?auto=compress&cs=tinysrgb&w=600', source: 'rawfile:sample_music_3.mp3', tag: '离线音乐', mediaType: 'music' } ];
+    new LocalMediaItem(1, '发如雪', '本地缓存', 'https://images.pexels.com/photos/1389429/pexels-photo-1389429.jpeg?auto=compress&cs=tinysrgb&w=600', 'rawfile:sample_music_1.mp3', '离线音乐', 'music'),
+    new LocalMediaItem(2, '听妈妈的话', '本地缓存', 'https://images.pexels.com/photos/167092/pexels-photo-167092.jpeg?auto=compress&cs=tinysrgb&w=600', 'rawfile:sample_music_2.mp3', '离线音乐', 'music'),
+    new LocalMediaItem(3, '以父之名', '本地缓存', 'https://images.pexels.com/photos/167092/pexels-photo-167092.jpeg?auto=compress&cs=tinysrgb&w=600', 'rawfile:sample_music_3.mp3', '离线音乐', 'music')
+  ];
 
   private readonly radioItems: LocalMediaItem[] = [
-    { id: 101, title: '晨间电台', artist: '本地缓存', cover: 'https://images.pexels.com/photos/164938/pexels-photo-164938.jpeg?auto=compress&cs=tinysrgb&w=600', source: 'rawfile:radio_1.mp3', tag: '离线电台', mediaType: 'radio' }
+    new LocalMediaItem(101, '晨间电台', '本地缓存', 'https://images.pexels.com/photos/164938/pexels-photo-164938.jpeg?auto=compress&cs=tinysrgb&w=600', 'rawfile:radio_1.mp3', '离线电台', 'radio')
   ];
+
+  private readonly lyricMap: Map<number, LyricLine[]> = new Map<number, LyricLine[]>([
+    [1, [
+      new LyricLine(0, '冰雪覆盖了青瓦'),
+      new LyricLine(12000, '我在等一场大雨落下'),
+      new LyricLine(23000, '灯火映着你脸颊'),
+      new LyricLine(34000, '把思念慢慢融化'),
+      new LyricLine(45000, '一夜风雪吹不散牵挂')
+    ]],
+    [2, [
+      new LyricLine(0, '窗外的天空还没亮'),
+      new LyricLine(11000, '妈妈的声音已经在回响'),
+      new LyricLine(22000, '那些简单的话'),
+      new LyricLine(32000, '陪我一路长大'),
+      new LyricLine(44000, '像一束光照进心房')
+    ]],
+    [3, [
+      new LyricLine(0, '我听见钟声在回荡'),
+      new LyricLine(13000, '黑夜里名字被轻轻念唱'),
+      new LyricLine(26000, '沿着命运的走廊'),
+      new LyricLine(38000, '把沉默都收藏'),
+      new LyricLine(50000, '只剩心跳还在发烫')
+    ]]
+  ]);
 
   private async getRawFileDescriptor(fileName: string): Promise<media.AVFileDescriptor | null> {
     if (this.rawFileDescriptors.has(fileName)) {
@@ -193,6 +251,27 @@ export struct MediaModule {
       clearInterval(this.rotateTimer);
       this.rotateTimer = -1;
     }
+  }
+
+  private getCurrentLyrics(): LyricLine[] {
+    if (!this.currentItem || this.currentItem.mediaType !== 'music') {
+      return [];
+    }
+    return this.lyricMap.get(this.currentItem.id) || [];
+  }
+
+  private getRenderedLyrics(): LyricRenderLine[] {
+    const lyrics = this.getCurrentLyrics();
+    if (lyrics.length === 0) {
+      return [new LyricRenderLine(0, '暂无歌词', true)];
+    }
+
+    const rendered: LyricRenderLine[] = [];
+    for (let index = 0; index < lyrics.length; index++) {
+      const line = lyrics[index];
+      rendered.push(new LyricRenderLine(line.time, line.text, this.totalTime > 0 ? this.currentTime >= line.time : false));
+    }
+    return rendered;
   }
 
   private formatTime(ms: number): string {
@@ -521,24 +600,37 @@ export struct MediaModule {
             .height(126)
 
             Column() {
+              Text('歌词')
+                .fontSize(14)
+                .fontWeight(FontWeight.Bold)
+                .fontColor('#FFFFFF')
+                .margin({ bottom: 6 })
+
               if (this.currentItem) {
-                Text(this.currentItem.title)
-                  .fontSize(18)
-                  .fontWeight(FontWeight.Bold)
-                  .fontColor('#FFFFFF')
-                  .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                Text(this.currentItem.artist)
-                  .fontSize(12)
-                  .fontColor('rgba(255,255,255,0.65)')
-                  .margin({ top: 4 })
+                Scroll(this.lyricScroller) {
+                  Column({ space: 8 }) {
+                    ForEach(this.getRenderedLyrics(), (line: LyricRenderLine) => {
+                      Text(line.text)
+                        .fontSize(line.isActive ? 15 : 13)
+                        .fontWeight(line.isActive ? FontWeight.Bold : FontWeight.Normal)
+                        .fontColor(line.isActive ? this.activeAccent : 'rgba(255,255,255,0.55)')
+                        .textAlign(TextAlign.Start)
+                        .width('100%')
+                        .padding({ top: 2, bottom: 2 })
+                    }, (line: LyricRenderLine) => `${line.time}-${line.text}`)
+                  }
+                  .width('100%')
+                }
+                .layoutWeight(1)
+                .scrollBar(BarState.Off)
               } else {
-                Text(this.emptyHint || '没有音乐缓存')
-                  .fontSize(16)
-                  .fontColor('#FFFFFF')
+                Text('暂无歌词')
+                  .fontSize(13)
+                  .fontColor('rgba(255,255,255,0.55)')
               }
             }
             .layoutWeight(1)
+            .height(126)
             .alignItems(HorizontalAlign.Start)
             .margin({ left: 12 })
           }
