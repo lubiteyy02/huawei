@@ -1,5 +1,6 @@
 import { media } from '@kit.MediaKit';
 import { audio } from '@kit.AudioKit';
+import { common } from '@kit.AbilityKit';
 import { CacheService } from '../services/CacheService';
 
 interface LocalMediaItem {
@@ -41,20 +42,40 @@ export struct MediaModule {
   @State activeFill: string = 'rgba(56,189,248,0.18)';
   @State activeTabBorder: string = '#38BDF8';
   @State activeGlow: string = 'rgba(56,189,248,0.22)';
+  @State isSeeking: boolean = false;
 
   private avPlayer: media.AVPlayer | undefined;
   private rotateTimer: number = -1;
-  private progressTimer: number = -1;
   private cacheService: CacheService = CacheService.getInstance();
+  private rawFileDescriptors: Map<string, media.AVFileDescriptor | null> = new Map();
 
   private readonly musicItems: LocalMediaItem[] = [
-    { id: 1, title: '清晨出发', artist: '本地缓存', cover: 'https://images.pexels.com/photos/1389429/pexels-photo-1389429.jpeg?auto=compress&cs=tinysrgb&w=600', source: 'rawfile:sample_music_1.mp3', tag: '离线音乐', mediaType: 'music' },
-    { id: 2, title: '城市漫游', artist: '本地缓存', cover: 'https://images.pexels.com/photos/167092/pexels-photo-167092.jpeg?auto=compress&cs=tinysrgb&w=600', source: 'rawfile:sample_music_2.mp3', tag: '离线音乐', mediaType: 'music' }
-  ];
+    { id: 1, title: '发如雪', artist: '本地缓存', cover: 'https://images.pexels.com/photos/1389429/pexels-photo-1389429.jpeg?auto=compress&cs=tinysrgb&w=600', source: 'rawfile:sample_music_1.mp3', tag: '离线音乐', mediaType: 'music' },
+    { id: 2, title: '听妈妈的话', artist: '本地缓存', cover: 'https://images.pexels.com/photos/167092/pexels-photo-167092.jpeg?auto=compress&cs=tinysrgb&w=600', source: 'rawfile:sample_music_2.mp3', tag: '离线音乐', mediaType: 'music' },
+ { id: 3, title: '以父之名', artist: '本地缓存', cover: 'https://images.pexels.com/photos/167092/pexels-photo-167092.jpeg?auto=compress&cs=tinysrgb&w=600', source: 'rawfile:sample_music_3.mp3', tag: '离线音乐', mediaType: 'music' } ];
 
   private readonly radioItems: LocalMediaItem[] = [
     { id: 101, title: '晨间电台', artist: '本地缓存', cover: 'https://images.pexels.com/photos/164938/pexels-photo-164938.jpeg?auto=compress&cs=tinysrgb&w=600', source: 'rawfile:radio_1.mp3', tag: '离线电台', mediaType: 'radio' }
   ];
+
+  private async getRawFileDescriptor(fileName: string): Promise<media.AVFileDescriptor | null> {
+    if (this.rawFileDescriptors.has(fileName)) {
+      return this.rawFileDescriptors.get(fileName) || null;
+    }
+
+    try {
+      const context = getContext() as common.Context;
+      const resourceManager = context.resourceManager;
+      const rawName = fileName.replace('rawfile:', '');
+      const descriptor = await resourceManager.getRawFd(rawName);
+      this.rawFileDescriptors.set(fileName, descriptor);
+      return descriptor;
+    } catch (err) {
+      console.error('[MediaModule] getRawFileDescriptor failed:', JSON.stringify(err));
+      this.rawFileDescriptors.set(fileName, null);
+      return null;
+    }
+  }
 
   aboutToAppear(): void {
     this.initPlayer();
@@ -137,6 +158,9 @@ export struct MediaModule {
     });
 
     this.avPlayer.on('timeUpdate', (time: number) => {
+      if (this.isSeeking) {
+        return;
+      }
       this.currentTime = time;
       this.progress = this.totalTime > 0 ? Math.min(100, (time / this.totalTime) * 100) : 0;
     });
@@ -162,22 +186,12 @@ export struct MediaModule {
     this.rotateTimer = setInterval(() => {
       this.rotateAngle = (this.rotateAngle + 1.2) % 360;
     }, 30);
-    this.progressTimer = setInterval(() => {
-      if (this.isPlaying && this.totalTime > 0 && this.currentTime < this.totalTime) {
-        this.currentTime += 1000;
-        this.progress = Math.min(100, (this.currentTime / this.totalTime) * 100);
-      }
-    }, 1000);
   }
 
   private stopAnimations(): void {
     if (this.rotateTimer !== -1) {
       clearInterval(this.rotateTimer);
       this.rotateTimer = -1;
-    }
-    if (this.progressTimer !== -1) {
-      clearInterval(this.progressTimer);
-      this.progressTimer = -1;
     }
   }
 
@@ -191,7 +205,7 @@ export struct MediaModule {
     return `${min}:${sec}`;
   }
 
-  private async loadItem(item: LocalMediaItem | MediaResourceItem, autoplay: boolean = false): Promise<void> {
+  private async loadItem(item: LocalMediaItem, autoplay: boolean = false): Promise<void> {
     if (!this.avPlayer) {
       this.statusText = '播放器未就绪';
       return;
@@ -206,13 +220,22 @@ export struct MediaModule {
       this.rotateAngle = 0;
       this.isPlaying = autoplay;
 
-      const localItem = item as LocalMediaItem;
+      const localItem = item;
       this.currentItem = localItem;
       this.statusText = `本地缓存：${localItem.title}`;
       this.emptyHint = '';
       this.isPlaying = autoplay;
+      if (!this.avPlayer) {
+        this.statusText = '播放器未就绪';
+        return;
+      }
+      const rawFile = await this.getRawFileDescriptor(localItem.source);
+      if (!rawFile) {
+        this.statusText = '找不到本地音频资源';
+        return;
+      }
       await this.avPlayer.reset();
-      this.avPlayer.url = localItem.source;
+      this.avPlayer.fdSrc = rawFile;
       if (autoplay) {
         await this.avPlayer.play();
       }
@@ -231,16 +254,19 @@ export struct MediaModule {
       return;
     }
 
-    if ((this.currentItem as MediaResourceItem).source === undefined) {
-      const localItem = this.currentItem as LocalMediaItem;
-      this.statusText = `本地缓存：${this.toDisplayName(localItem.source)}`;
-      return;
-    }
+    const localItem = this.currentItem as LocalMediaItem;
+    this.statusText = `本地缓存：${localItem.title}`;
 
     try {
       if (this.isPlaying) {
         await this.avPlayer.pause();
       } else {
+        const rawFile = await this.getRawFileDescriptor(localItem.source);
+        if (!rawFile) {
+          this.statusText = '找不到本地音频资源';
+          return;
+        }
+        this.avPlayer.fdSrc = rawFile;
         await this.avPlayer.play();
       }
     } catch (err) {
@@ -306,30 +332,6 @@ export struct MediaModule {
     }, 120);
   }
 
-  private async loadBackendResources(): Promise<void> {
-    try {
-      const response = await this.resourceService.getResources(this.activeTab === TabType.MUSIC ? 'music' : 'radio');
-      if (response.code === 200 && response.data) {
-        this.searchResults = response.data;
-        if (!this.currentItem && response.data.length > 0) {
-          this.currentItem = response.data[0];
-        }
-        this.statusText = `已获取 ${response.data.length} 条后端资源`;
-      } else {
-        this.searchResults = [];
-      }
-    } catch (err) {
-      this.searchResults = [];
-      console.error('[MediaModule] loadBackendResources failed:', JSON.stringify(err));
-    }
-  }
-
-  private toDisplayName(source: string): string {
-    const fileName = source.split('/').pop() || source;
-    const name = fileName.replace(/^rawfile:/, '').replace(/\.(mp3|wav|m4a|aac|ogg|mp4)$/i, '');
-    return name.replace(/[_-]+/g, ' ');
-  }
-
   private async searchOnlineResources(): Promise<void> {
     const keyword = this.searchKeyword.trim();
     if (keyword === '') {
@@ -337,22 +339,11 @@ export struct MediaModule {
       return;
     }
 
-    this.isLoading = true;
-    try {
-      const response = await this.resourceService.getResources(this.activeTab === TabType.MUSIC ? 'music' : 'radio', keyword);
-      if (response.code === 200 && response.data) {
-        this.searchResults = response.data;
-        this.statusText = `找到 ${response.data.length} 条在线资源`;
-      } else {
-        this.searchResults = [];
-        this.statusText = response.message || '未找到资源';
-      }
-    } catch (err) {
-      this.searchResults = [];
-      this.statusText = `搜索失败: ${JSON.stringify(err)}`;
-    } finally {
-      this.isLoading = false;
-    }
+    // 取消后端搜索，只对当前已有本地歌曲做过滤展示
+    this.searchResults = this.getCurrentList().filter((item) =>
+      item.title.includes(keyword) || item.artist.includes(keyword)
+    );
+    this.statusText = this.searchResults.length > 0 ? `找到 ${this.searchResults.length} 条本地结果` : '未找到匹配歌曲';
   }
 
   @Builder
@@ -370,7 +361,7 @@ export struct MediaModule {
   }
 
   @Builder
-  private MediaCard(item: LocalMediaItem | MediaResourceItem) {
+  private MediaCard(item: LocalMediaItem) {
     Row() {
       Image(item.cover)
         .width(72)
@@ -599,6 +590,20 @@ export struct MediaModule {
                   .margin({ left: 8, right: 8 })
                   .trackColor('rgba(255,255,255,0.10)')
                   .selectedColor('#38BDF8')
+                  .onChange(async (value: number) => {
+                    this.isSeeking = true;
+                    try {
+                      const clamped = Math.max(0, Math.min(100, value));
+                      const target = this.totalTime > 0 ? Math.floor((clamped / 100) * this.totalTime) : 0;
+                      this.progress = clamped;
+                      this.currentTime = target;
+                      await this.avPlayer?.seek(target);
+                    } catch (err) {
+                      console.error('[MediaModule] seek failed:', JSON.stringify(err));
+                    } finally {
+                      this.isSeeking = false;
+                    }
+                  })
                 Text(this.formatTime(this.totalTime))
                   .fontSize(10)
                   .fontColor('rgba(255,255,255,0.55)')
@@ -629,13 +634,13 @@ export struct MediaModule {
               .margin({ bottom: 8 })
 
             if (this.searchResults.length > 0) {
-              Text('在线搜索结果')
+              Text('搜索结果')
                 .fontSize(11)
                 .fontColor('rgba(255,255,255,0.55)')
                 .margin({ bottom: 6 })
 
               List({ space: 8 }) {
-                ForEach(this.searchResults, (item: MediaResourceItem) => {
+                ForEach(this.searchResults, (item: LocalMediaItem) => {
                   ListItem() {
                     this.MediaCard(item)
                   }
@@ -646,7 +651,7 @@ export struct MediaModule {
             }
 
             List({ space: 8 }) {
-              ForEach(this.getCurrentList(), (item: LocalMediaItem | MediaResourceItem) => {
+              ForEach(this.getCurrentList(), (item: LocalMediaItem) => {
                 ListItem() {
                   this.MediaCard(item)
                 }
