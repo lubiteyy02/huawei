@@ -1,6 +1,5 @@
 import { media } from '@kit.MediaKit';
 import { audio } from '@kit.AudioKit';
-import { MediaResourceService, MediaResourceItem } from '../services/MediaResourceService';
 import { CacheService } from '../services/CacheService';
 
 interface LocalMediaItem {
@@ -23,7 +22,7 @@ export struct MediaModule {
   @Prop isPageVisible: boolean = true;
 
   @State activeTab: TabType = TabType.MUSIC;
-  @State currentItem: LocalMediaItem | MediaResourceItem | null = null;
+  @State currentItem: LocalMediaItem | null = null;
   @State isPlaying: boolean = false;
   @State isLoading: boolean = false;
   @State currentTime: number = 0;
@@ -33,7 +32,7 @@ export struct MediaModule {
   @State rotateAngle: number = 0;
   @State showSearchPanel: boolean = false;
   @State searchKeyword: string = '';
-  @State searchResults: MediaResourceItem[] = [];
+  @State searchResults: Array<LocalMediaItem> = [];
   @State emptyHint: string = '';
   @State viewToken: number = 0;
   @State contentOpacity: number = 1;
@@ -46,16 +45,15 @@ export struct MediaModule {
   private avPlayer: media.AVPlayer | undefined;
   private rotateTimer: number = -1;
   private progressTimer: number = -1;
-  private resourceService: MediaResourceService = MediaResourceService.getInstance();
   private cacheService: CacheService = CacheService.getInstance();
 
   private readonly musicItems: LocalMediaItem[] = [
-    { id: 1, title: '本地音乐一', artist: 'Rawfile 资源', cover: 'https://images.pexels.com/photos/1389429/pexels-photo-1389429.jpeg?auto=compress&cs=tinysrgb&w=600', source: 'rawfile:sample_music_1.mp3', tag: '离线音乐', mediaType: 'music' },
-    { id: 2, title: '本地音乐二', artist: 'Rawfile 资源', cover: 'https://images.pexels.com/photos/167092/pexels-photo-167092.jpeg?auto=compress&cs=tinysrgb&w=600', source: 'rawfile:sample_music_2.mp3', tag: '离线音乐', mediaType: 'music' }
+    { id: 1, title: '清晨出发', artist: '本地缓存', cover: 'https://images.pexels.com/photos/1389429/pexels-photo-1389429.jpeg?auto=compress&cs=tinysrgb&w=600', source: 'rawfile:sample_music_1.mp3', tag: '离线音乐', mediaType: 'music' },
+    { id: 2, title: '城市漫游', artist: '本地缓存', cover: 'https://images.pexels.com/photos/167092/pexels-photo-167092.jpeg?auto=compress&cs=tinysrgb&w=600', source: 'rawfile:sample_music_2.mp3', tag: '离线音乐', mediaType: 'music' }
   ];
 
   private readonly radioItems: LocalMediaItem[] = [
-    { id: 101, title: '晨间电台', artist: '本地电台占位', cover: 'https://images.pexels.com/photos/164938/pexels-photo-164938.jpeg?auto=compress&cs=tinysrgb&w=600', source: 'rawfile:radio_1.mp3', tag: '离线电台', mediaType: 'radio' }
+    { id: 101, title: '晨间电台', artist: '本地缓存', cover: 'https://images.pexels.com/photos/164938/pexels-photo-164938.jpeg?auto=compress&cs=tinysrgb&w=600', source: 'rawfile:radio_1.mp3', tag: '离线电台', mediaType: 'radio' }
   ];
 
   aboutToAppear(): void {
@@ -67,19 +65,20 @@ export struct MediaModule {
     this.cleanup();
   }
 
-  private getCurrentList(): Array<LocalMediaItem | MediaResourceItem> {
+  private getCurrentList(): LocalMediaItem[] {
     return this.activeTab === TabType.MUSIC ? this.musicItems : this.radioItems;
   }
 
   private async loadLocalCache(): Promise<void> {
     const key = this.activeTab === TabType.MUSIC ? 'local_music_cache' : 'local_radio_cache';
-    const cached = await this.cacheService.get<Array<LocalMediaItem | MediaResourceItem>>(key);
+    const cached = await this.cacheService.get<Array<LocalMediaItem>>(key);
     this.updateAccent();
 
     if (cached && cached.length > 0) {
       this.emptyHint = '';
       this.currentItem = cached[0];
       this.statusText = '已加载本地缓存';
+      this.searchResults = [];
       this.viewToken++;
       return;
     }
@@ -87,10 +86,8 @@ export struct MediaModule {
     this.emptyHint = '没有音乐缓存';
     this.statusText = '没有音乐缓存';
     this.currentItem = null;
+    this.searchResults = [];
     this.viewToken++;
-
-    // 没有本地缓存时，自动拉取后端在线资源列表作为兜底显示
-    await this.loadBackendResources();
   }
 
   private initPlayer(): void {
@@ -209,20 +206,16 @@ export struct MediaModule {
       this.rotateAngle = 0;
       this.isPlaying = autoplay;
 
-      if ((item as MediaResourceItem).source !== undefined) {
-        const onlineItem = item as MediaResourceItem;
-        await this.avPlayer.reset();
-        this.avPlayer.url = onlineItem.source;
-        this.statusText = autoplay ? '正在播放在线资源...' : '在线资源已加载';
-        if (autoplay) {
-          await this.avPlayer.play();
-        }
-        return;
+      const localItem = item as LocalMediaItem;
+      this.currentItem = localItem;
+      this.statusText = `本地缓存：${localItem.title}`;
+      this.emptyHint = '';
+      this.isPlaying = autoplay;
+      await this.avPlayer.reset();
+      this.avPlayer.url = localItem.source;
+      if (autoplay) {
+        await this.avPlayer.play();
       }
-
-      this.statusText = '请先确认 rawfile 中存在对应离线资源';
-      this.emptyHint = '没有音乐缓存';
-      this.isPlaying = false;
     } catch (err) {
       console.error('[MediaModule] loadItem failed:', JSON.stringify(err));
       this.statusText = '加载失败';
@@ -239,7 +232,8 @@ export struct MediaModule {
     }
 
     if ((this.currentItem as MediaResourceItem).source === undefined) {
-      this.statusText = '没有音乐缓存';
+      const localItem = this.currentItem as LocalMediaItem;
+      this.statusText = `本地缓存：${this.toDisplayName(localItem.source)}`;
       return;
     }
 
@@ -328,6 +322,12 @@ export struct MediaModule {
       this.searchResults = [];
       console.error('[MediaModule] loadBackendResources failed:', JSON.stringify(err));
     }
+  }
+
+  private toDisplayName(source: string): string {
+    const fileName = source.split('/').pop() || source;
+    const name = fileName.replace(/^rawfile:/, '').replace(/\.(mp3|wav|m4a|aac|ogg|mp4)$/i, '');
+    return name.replace(/[_-]+/g, ' ');
   }
 
   private async searchOnlineResources(): Promise<void> {
