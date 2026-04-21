@@ -266,12 +266,16 @@ export struct MediaModule {
       return [new LyricRenderLine(0, '暂无歌词', true)];
     }
 
-    const rendered: LyricRenderLine[] = [];
+    let activeIndex = 0;
     for (let index = 0; index < lyrics.length; index++) {
-      const line = lyrics[index];
-      rendered.push(new LyricRenderLine(line.time, line.text, this.totalTime > 0 ? this.currentTime >= line.time : false));
+      if (this.currentTime >= lyrics[index].time) {
+        activeIndex = index;
+      } else {
+        break;
+      }
     }
-    return rendered;
+
+    return lyrics.map((line, index) => new LyricRenderLine(line.time, line.text, index === activeIndex));
   }
 
   private formatTime(ms: number): string {
@@ -423,6 +427,24 @@ export struct MediaModule {
       item.title.includes(keyword) || item.artist.includes(keyword)
     );
     this.statusText = this.searchResults.length > 0 ? `找到 ${this.searchResults.length} 条本地结果` : '未找到匹配歌曲';
+  }
+
+  private async seekToLyric(time: number): Promise<void> {
+    if (!this.avPlayer || this.totalTime <= 0) {
+      return;
+    }
+    const target = Math.max(0, Math.min(time, this.totalTime));
+    const progressValue = Math.min(100, Math.max(0, (target / this.totalTime) * 100));
+    this.isSeeking = true;
+    this.currentTime = target;
+    this.progress = progressValue;
+    try {
+      await this.avPlayer.seek(target);
+    } catch (err) {
+      console.error('[MediaModule] seekToLyric failed:', JSON.stringify(err));
+    } finally {
+      this.isSeeking = false;
+    }
   }
 
   @Builder
@@ -589,37 +611,42 @@ export struct MediaModule {
             Stack({ alignContent: Alignment.Center }) {
               if (this.currentItem) {
                 Image(this.currentItem.cover)
-                  .width(112)
-                  .height(112)
-                  .borderRadius(18)
+                  .width(132)
+                  .height(132)
+                  .borderRadius(20)
                   .rotate({ angle: this.rotateAngle })
                   .objectFit(ImageFit.Cover)
               }
             }
-            .width(126)
-            .height(126)
+            .width('44%')
+            .height(160)
 
             Column() {
               Text('歌词')
-                .fontSize(14)
+                .fontSize(15)
                 .fontWeight(FontWeight.Bold)
                 .fontColor('#FFFFFF')
-                .margin({ bottom: 6 })
+                .margin({ bottom: 10 })
 
               if (this.currentItem) {
                 Scroll(this.lyricScroller) {
-                  Column({ space: 8 }) {
+                  Column({ space: 10 }) {
                     ForEach(this.getRenderedLyrics(), (line: LyricRenderLine) => {
                       Text(line.text)
-                        .fontSize(line.isActive ? 15 : 13)
+                        .fontSize(line.isActive ? 18 : 13)
                         .fontWeight(line.isActive ? FontWeight.Bold : FontWeight.Normal)
-                        .fontColor(line.isActive ? this.activeAccent : 'rgba(255,255,255,0.55)')
-                        .textAlign(TextAlign.Start)
+                        .fontColor(line.isActive ? '#FFFFFF' : 'rgba(255,255,255,0.42)')
+                        .backgroundColor(line.isActive ? 'rgba(56,189,248,0.22)' : 'transparent')
+                        .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+                        .borderRadius(10)
                         .width('100%')
-                        .padding({ top: 2, bottom: 2 })
+                        .onClick(() => {
+                          void this.seekToLyric(line.time);
+                        })
                     }, (line: LyricRenderLine) => `${line.time}-${line.text}`)
                   }
                   .width('100%')
+                  .padding({ right: 10 })
                 }
                 .layoutWeight(1)
                 .scrollBar(BarState.Off)
@@ -630,15 +657,15 @@ export struct MediaModule {
               }
             }
             .layoutWeight(1)
-            .height(126)
+            .height(160)
             .alignItems(HorizontalAlign.Start)
-            .margin({ left: 12 })
+            .margin({ left: 16 })
           }
           .width('100%')
-          .padding(14)
-          .backgroundColor('rgba(255,255,255,0.05)')
-          .borderRadius(18)
-          .border({ width: 1, color: 'rgba(255,255,255,0.08)' })
+          .padding(16)
+          .backgroundColor('rgba(255,255,255,0.06)')
+          .borderRadius(20)
+          .border({ width: 1, color: 'rgba(255,255,255,0.10)' })
           .margin({ left: 18, right: 18, top: 2 })
           .opacity(this.contentOpacity)
           .translate({ x: 0, y: this.contentOffset })
@@ -683,12 +710,12 @@ export struct MediaModule {
                   .trackColor('rgba(255,255,255,0.10)')
                   .selectedColor('#38BDF8')
                   .onChange(async (value: number) => {
+                    const clamped = Math.max(0, Math.min(100, value));
+                    const target = this.totalTime > 0 ? Math.floor((clamped / 100) * this.totalTime) : 0;
                     this.isSeeking = true;
+                    this.progress = clamped;
+                    this.currentTime = target;
                     try {
-                      const clamped = Math.max(0, Math.min(100, value));
-                      const target = this.totalTime > 0 ? Math.floor((clamped / 100) * this.totalTime) : 0;
-                      this.progress = clamped;
-                      this.currentTime = target;
                       await this.avPlayer?.seek(target);
                     } catch (err) {
                       console.error('[MediaModule] seek failed:', JSON.stringify(err));
