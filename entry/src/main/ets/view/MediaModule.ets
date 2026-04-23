@@ -56,6 +56,7 @@ export struct MediaModule {
 
   @State activeTab: TabType = TabType.MUSIC;
   @State currentItem: LocalMediaItem | null = null;
+  @State defaultCoverVisible: boolean = true;
   @State isPlaying: boolean = false;
   @State isLoading: boolean = false;
   @State currentTime: number = 0;
@@ -66,6 +67,7 @@ export struct MediaModule {
   @State showSearchPanel: boolean = false;
   @State searchKeyword: string = '';
   @State searchResults: Array<LocalMediaItem> = [];
+  @State isSearchPanelVisible: boolean = false;
   @State emptyHint: string = '';
   @State viewToken: number = 0;
   @State contentOpacity: number = 1;
@@ -77,10 +79,12 @@ export struct MediaModule {
   @State isSeeking: boolean = false;
 
   private avPlayer: media.AVPlayer | undefined;
+  private pendingAutoplay: boolean = false;
   private rotateTimer: number = -1;
   private cacheService: CacheService = CacheService.getInstance();
   private rawFileDescriptors: Map<string, media.AVFileDescriptor | null> = new Map();
   private lyricScroller: Scroller = new Scroller();
+  private readonly defaultCover: string = 'https://images.pexels.com/photos/16767318/pexels-photo-16767318.jpeg?auto=compress&cs=tinysrgb&w=600';
 
   private readonly musicItems: LocalMediaItem[] = [
     new LocalMediaItem(1, '发如雪', '本地缓存', 'https://images.pexels.com/photos/1389429/pexels-photo-1389429.jpeg?auto=compress&cs=tinysrgb&w=600', 'rawfile:sample_music_1.mp3', '离线音乐', 'music'),
@@ -137,6 +141,7 @@ export struct MediaModule {
 
   aboutToAppear(): void {
     this.initPlayer();
+    this.defaultCoverVisible = !this.currentItem && !this.isPlaying;
     void this.loadLocalCache();
   }
 
@@ -155,7 +160,9 @@ export struct MediaModule {
 
     if (cached && cached.length > 0) {
       this.emptyHint = '';
-      this.currentItem = cached[0];
+      if (!this.currentItem && !this.isPlaying) {
+        this.defaultCoverVisible = true;
+      }
       this.statusText = '已加载本地缓存';
       this.searchResults = [];
       this.viewToken++;
@@ -164,7 +171,9 @@ export struct MediaModule {
 
     this.emptyHint = '没有音乐缓存';
     this.statusText = '没有音乐缓存';
-    this.currentItem = null;
+    if (!this.currentItem && !this.isPlaying) {
+      this.defaultCoverVisible = true;
+    }
     this.searchResults = [];
     this.viewToken++;
   }
@@ -196,7 +205,9 @@ export struct MediaModule {
           await this.avPlayer?.prepare();
         } else if (state === 'prepared') {
           this.totalTime = this.avPlayer?.duration || 0;
-          if (this.isPlaying) {
+          if (this.pendingAutoplay) {
+            this.pendingAutoplay = false;
+            this.isPlaying = true;
             await this.avPlayer?.play();
           }
         } else if (state === 'playing') {
@@ -254,7 +265,7 @@ export struct MediaModule {
   }
 
   private getCurrentLyrics(): LyricLine[] {
-    if (!this.currentItem || this.currentItem.mediaType !== 'music') {
+    if (this.defaultCoverVisible || !this.currentItem || this.currentItem.mediaType !== 'music') {
       return [];
     }
     return this.lyricMap.get(this.currentItem.id) || [];
@@ -296,14 +307,17 @@ export struct MediaModule {
 
     try {
       this.isLoading = true;
+      this.defaultCoverVisible = false;
       this.currentItem = item;
       this.currentTime = 0;
       this.totalTime = 0;
       this.progress = 0;
       this.rotateAngle = 0;
       this.isPlaying = autoplay;
+      this.pendingAutoplay = autoplay;
 
       const localItem = item;
+      this.defaultCoverVisible = false;
       this.currentItem = localItem;
       this.statusText = `本地缓存：${localItem.title}`;
       this.emptyHint = '';
@@ -319,9 +333,8 @@ export struct MediaModule {
       }
       await this.avPlayer.reset();
       this.avPlayer.fdSrc = rawFile;
-      if (autoplay) {
-        await this.avPlayer.play();
-      }
+      await this.avPlayer.prepare();
+      this.pendingAutoplay = autoplay;
     } catch (err) {
       console.error('[MediaModule] loadItem failed:', JSON.stringify(err));
       this.statusText = '加载失败';
@@ -344,12 +357,7 @@ export struct MediaModule {
       if (this.isPlaying) {
         await this.avPlayer.pause();
       } else {
-        const rawFile = await this.getRawFileDescriptor(localItem.source);
-        if (!rawFile) {
-          this.statusText = '找不到本地音频资源';
-          return;
-        }
-        this.avPlayer.fdSrc = rawFile;
+        this.pendingAutoplay = false;
         await this.avPlayer.play();
       }
     } catch (err) {
@@ -395,6 +403,12 @@ export struct MediaModule {
 
   private async switchTab(tab: TabType): Promise<void> {
     if (this.activeTab === tab) {
+      if (tab === TabType.MUSIC) {
+        this.searchResults = [];
+        this.searchKeyword = '';
+        this.isSearchPanelVisible = false;
+      }
+      void this.loadLocalCache();
       return;
     }
 
@@ -403,9 +417,10 @@ export struct MediaModule {
     setTimeout(() => {
       this.activeTab = tab;
       this.updateAccent();
-      this.currentItem = this.getCurrentList()[0] || null;
       this.statusText = tab === TabType.MUSIC ? '当前为音乐模式' : '当前为电台模式';
       this.searchResults = [];
+      this.searchKeyword = '';
+      this.isSearchPanelVisible = false;
       this.emptyHint = '';
       void this.loadLocalCache();
       setTimeout(() => {
@@ -418,15 +433,32 @@ export struct MediaModule {
   private async searchOnlineResources(): Promise<void> {
     const keyword = this.searchKeyword.trim();
     if (keyword === '') {
+      this.searchResults = [];
       this.statusText = '请输入搜索关键词';
       return;
     }
 
-    // 取消后端搜索，只对当前已有本地歌曲做过滤展示
     this.searchResults = this.getCurrentList().filter((item) =>
       item.title.includes(keyword) || item.artist.includes(keyword)
     );
     this.statusText = this.searchResults.length > 0 ? `找到 ${this.searchResults.length} 条本地结果` : '未找到匹配歌曲';
+
+    this.isSearchPanelVisible = false;
+  }
+
+  private openSearchPanel(): void {
+    this.isSearchPanelVisible = true;
+  }
+
+  private closeSearchPanel(): void {
+    this.isSearchPanelVisible = false;
+    this.searchKeyword = '';
+    this.searchResults = [];
+    this.loadLocalCache();
+  }
+
+  private onSearchKeywordChange(value: string): void {
+    this.searchKeyword = value;
   }
 
   private async seekToLyric(time: number): Promise<void> {
@@ -500,7 +532,7 @@ export struct MediaModule {
     .backgroundColor('rgba(255,255,255,0.05)')
     .borderRadius(16)
     .onClick(() => {
-      void this.loadItem(item, false);
+      void this.loadItem(item, true);
     })
   }
 
@@ -524,7 +556,7 @@ export struct MediaModule {
           }
           .alignItems(HorizontalAlign.Start)
 
-          Button(this.showSearchPanel ? '关闭搜索' : '搜索')
+          Button('搜索')
             .height(34)
             .fontSize(12)
             .backgroundColor('#38BDF8')
@@ -532,7 +564,7 @@ export struct MediaModule {
             .borderRadius(17)
             .margin({ top: 24, bottom: 2 })
             .onClick(() => {
-              this.showSearchPanel = !this.showSearchPanel;
+              this.openSearchPanel();
             })
         }
         .width('100%')
@@ -551,14 +583,14 @@ export struct MediaModule {
           .fontColor(this.activeAccent)
           .padding({ left: 18, right: 18, bottom: 6 })
 
-        if (this.showSearchPanel) {
+        if (this.isSearchPanelVisible) {
           Stack() {
             Rect()
               .width('100%')
               .height('100%')
               .fill('rgba(3, 7, 18, 0.30)')
               .onClick(() => {
-                this.showSearchPanel = false;
+                this.closeSearchPanel();
               })
 
             Column() {
@@ -569,7 +601,7 @@ export struct MediaModule {
                 .margin({ bottom: 10 })
 
               Row() {
-                TextInput({ placeholder: '搜索在线资源，如：天气 / 交通 / 轻音乐' })
+                TextInput({ placeholder: '搜索歌曲名或歌手名' })
                   .layoutWeight(1)
                   .height(42)
                   .backgroundColor('rgba(11, 18, 32, 0.96)')
@@ -578,7 +610,7 @@ export struct MediaModule {
                   .borderRadius(21)
                   .padding({ left: 12, right: 12 })
                   .onChange((value: string) => {
-                    this.searchKeyword = value;
+                    this.onSearchKeywordChange(value);
                   })
 
                 Button('查找')
@@ -609,7 +641,33 @@ export struct MediaModule {
         Column() {
           Row() {
             Stack({ alignContent: Alignment.Center }) {
-              if (this.currentItem) {
+              if (this.defaultCoverVisible || !this.currentItem) {
+                Stack({ alignContent: Alignment.Center }) {
+                  Circle()
+                    .width(132)
+                    .height(132)
+                    .fill('rgba(255,255,255,0.04)')
+
+                  Circle()
+                    .width(118)
+                    .height(118)
+                    .fill('rgba(255,255,255,0.08)')
+
+                  Circle()
+                    .width(86)
+                    .height(86)
+                    .fill('rgba(56,189,248,0.22)')
+
+                  Image('https://images.pexels.com/photos/16767318/pexels-photo-16767318.jpeg?auto=compress&cs=tinysrgb&w=600')
+                    .width(78)
+                    .height(78)
+                    .borderRadius(39)
+                    .rotate({ angle: this.rotateAngle })
+                    .objectFit(ImageFit.Cover)
+                }
+                .width(132)
+                .height(132)
+              } else {
                 Image(this.currentItem.cover)
                   .width(132)
                   .height(132)
@@ -622,13 +680,13 @@ export struct MediaModule {
             .height(160)
 
             Column() {
-              Text('歌词')
-                .fontSize(15)
-                .fontWeight(FontWeight.Bold)
-                .fontColor('#FFFFFF')
-                .margin({ bottom: 10 })
+              if (!this.defaultCoverVisible && this.currentItem) {
+                Text('歌词')
+                  .fontSize(15)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor('#FFFFFF')
+                  .margin({ bottom: 10 })
 
-              if (this.currentItem) {
                 Scroll(this.lyricScroller) {
                   Column({ space: 10 }) {
                     ForEach(this.getRenderedLyrics(), (line: LyricRenderLine) => {
@@ -651,9 +709,8 @@ export struct MediaModule {
                 .layoutWeight(1)
                 .scrollBar(BarState.Off)
               } else {
-                Text('暂无歌词')
+                Text('')
                   .fontSize(13)
-                  .fontColor('rgba(255,255,255,0.55)')
               }
             }
             .layoutWeight(1)
@@ -752,25 +809,12 @@ export struct MediaModule {
               .fontColor('#FFFFFF')
               .margin({ bottom: 8 })
 
-            if (this.searchResults.length > 0) {
-              Text('搜索结果')
-                .fontSize(11)
-                .fontColor('rgba(255,255,255,0.55)')
-                .margin({ bottom: 6 })
-
-              List({ space: 8 }) {
-                ForEach(this.searchResults, (item: LocalMediaItem) => {
-                  ListItem() {
-                    this.MediaCard(item)
-                  }
-                })
-              }
-              .width('100%')
-              .height('40%')
-            }
-
             List({ space: 8 }) {
-              ForEach(this.getCurrentList(), (item: LocalMediaItem) => {
+              ForEach(this.searchKeyword.trim() === ''
+                ? this.getCurrentList()
+                : this.getCurrentList().filter((item) =>
+                    item.title.includes(this.searchKeyword.trim()) || item.artist.includes(this.searchKeyword.trim())
+                  ), (item: LocalMediaItem) => {
                 ListItem() {
                   this.MediaCard(item)
                 }
