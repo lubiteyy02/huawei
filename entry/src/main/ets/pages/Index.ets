@@ -36,17 +36,22 @@ struct Index {
   private readonly BALL_SIZE: number = 60
   private readonly EXPAND_RADIUS: number = 90
   private readonly ITEM_SIZE: number = 56
+  private readonly PANEL_SIZE: number = 260
+  private readonly CENTER_BALL_SIZE: number = 74
+  private readonly PANEL_ITEM_SIZE: number = 52
 
   private readonly menuItems: ModuleConfig[] = [
     { title: "车况", index: 0, angle: -90, icon: "🚗" },
-    { title: "导航", index: 1, angle: -45, icon: "🧭" },
-    { title: "娱乐", index: 2, angle: 45, icon: "🎵" },
-    { title: "协同", index: 3, angle: 135, icon: "🤝" },
-    { title: "我的", index: 4, angle: 180, icon: "👤" }
+    { title: "导航", index: 1, angle: -18, icon: "🧭" },
+    { title: "娱乐", index: 2, angle: 54, icon: "🎵" },
+    { title: "协同", index: 3, angle: 126, icon: "🤝" },
+    { title: "我的", index: 4, angle: 198, icon: "👤" }
   ]
 
   private startX: number = 0
   private startY: number = 0
+  private centerBallX: number = 0
+  private centerBallY: number = 0
 
   aboutToAppear() {
     console.log('[Index] ========== aboutToAppear 开始 ==========');
@@ -253,42 +258,34 @@ struct Index {
           .animation({ duration: 150 })
       }
       .width(this.ITEM_SIZE).height(this.ITEM_SIZE)
-      // 样式逻辑：选中亮一点，未选中暗一点
       .backgroundColor(this.currentIndex === item.index ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.1)')
       .backgroundBlurStyle(this.currentIndex === item.index ? BlurStyle.Regular : BlurStyle.Thin)
-      // 一次成型裁剪
       .borderRadius(this.ITEM_SIZE / 2)
       .clip(true)
       .border({ width: 0.5, color: 'rgba(255,255,255,0.15)' })
       .onClick(() => {
-        // === 逻辑修正 ===
         if (item.index === 4) {
-          // "我的"选项 - 跳转到个人中心页面
           router.pushUrl({ url: 'pages/UserCenterPage' })
-          this.toggleExpand() // 收起菜单
+          this.toggleExpand()
         } else {
-          // 其他选项 - 切换 Tab
           this.currentIndex = item.index
           this.controller.changeIndex(item.index)
-          // 这里删除了 this.toggleExpand()
-          // 这样点击切换时，菜单不会收回去，您可以继续看其他状态
         }
       })
 
-      // 文字
       Text(item.title)
         .fontSize(10).fontColor('rgba(255,255,255,0.7)').fontWeight(FontWeight.Regular)
         .opacity(this.isExpanded ? 1 : 0)
         .animation({ duration: 200 })
     }
     .position({
-      x: this.ballX + (this.BALL_SIZE - this.ITEM_SIZE) / 2 +
-        (this.isExpanded ? this.EXPAND_RADIUS * Math.cos(item.angle * Math.PI / 180) : 0),
-      y: this.ballY + (this.BALL_SIZE - this.ITEM_SIZE) / 2 +
-        (this.isExpanded ? this.EXPAND_RADIUS * Math.sin(item.angle * Math.PI / 180) : 0)
+      x: this.ballX + (this.BALL_SIZE / 2) - (this.ITEM_SIZE / 2) +
+        (this.isExpanded ? (this.EXPAND_RADIUS - 8) * Math.cos(item.angle * Math.PI / 180) : 0),
+      y: this.ballY + (this.BALL_SIZE / 2) - (this.ITEM_SIZE / 2) +
+        (this.isExpanded ? (this.EXPAND_RADIUS - 8) * Math.sin(item.angle * Math.PI / 180) : 0)
     })
     .zIndex(9999)
-    .scale({ x: this.isExpanded ? 1 : 0, y: this.isExpanded ? 1 : 0 })
+    .scale({ x: this.isExpanded ? 1 : 0.45, y: this.isExpanded ? 1 : 0.45 })
     .opacity(this.isExpanded ? 1 : 0)
     .animation({ curve: curves.springMotion(0.6, 0.75) })
   }
@@ -313,7 +310,6 @@ struct Index {
     .position({ x: this.ballX, y: this.ballY })
     .zIndex(10000)
     .onClick(() => {
-      // 主动点击球体 -> 切换收缩/展开
       this.toggleExpand()
     })
     .gesture(

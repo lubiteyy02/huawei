@@ -1,6 +1,7 @@
 import { media } from '@kit.MediaKit';
 import { audio } from '@kit.AudioKit';
 import { common } from '@kit.AbilityKit';
+import { fileIo } from '@kit.CoreFileKit';
 import { CacheService } from '../services/CacheService';
 
 class LocalMediaItem {
@@ -21,6 +22,27 @@ class LocalMediaItem {
     this.tag = tag;
     this.mediaType = mediaType;
   }
+}
+
+interface RadioStationEntry {
+  id: string;
+  name: string;
+  url: string;
+  language: string;
+  tags: string;
+  favicon: string;
+  country: string;
+  codec: string;
+  bitrate: number;
+  votes: number;
+  clickcount: number;
+}
+
+interface RadioStationsFile {
+  source: string;
+  country: string;
+  count: number;
+  stations: RadioStationEntry[];
 }
 
 class LyricLine {
@@ -77,6 +99,10 @@ export struct MediaModule {
   @State activeTabBorder: string = '#38BDF8';
   @State activeGlow: string = 'rgba(56,189,248,0.22)';
   @State isSeeking: boolean = false;
+  @State tabPressed: TabType | null = null;
+  @State searchPressed: boolean = false;
+  @State controlPressed: string = '';
+  @State tabPressOffset: number = 0;
 
   private avPlayer: media.AVPlayer | undefined;
   private pendingAutoplay: boolean = false;
@@ -92,9 +118,10 @@ export struct MediaModule {
     new LocalMediaItem(3, '以父之名', '本地缓存', 'https://images.pexels.com/photos/167092/pexels-photo-167092.jpeg?auto=compress&cs=tinysrgb&w=600', 'rawfile:sample_music_3.mp3', '离线音乐', 'music')
   ];
 
-  private readonly radioItems: LocalMediaItem[] = [
+  private radioItems: LocalMediaItem[] = [
     new LocalMediaItem(101, '晨间电台', '本地缓存', 'https://images.pexels.com/photos/164938/pexels-photo-164938.jpeg?auto=compress&cs=tinysrgb&w=600', 'rawfile:radio_1.mp3', '离线电台', 'radio')
   ];
+  private radioStationCacheKey: string = 'radio_stations_clean_cache';
 
   private readonly lyricMap: Map<number, LyricLine[]> = new Map<number, LyricLine[]>([
     [1, [
@@ -151,6 +178,49 @@ export struct MediaModule {
 
   private getCurrentList(): LocalMediaItem[] {
     return this.activeTab === TabType.MUSIC ? this.musicItems : this.radioItems;
+  }
+
+  private radioStationsToMediaItems(stations: RadioStationEntry[]): LocalMediaItem[] {
+    return stations.slice(0, 200).map((station, index) => {
+      const cover = station.favicon && station.favicon.trim() !== ''
+        ? station.favicon
+        : this.defaultCover;
+      const tag = station.tags && station.tags.trim() !== '' ? station.tags.split(',')[0] : '网络电台';
+      return new LocalMediaItem(
+        1000 + index,
+        station.name,
+        station.language || '未知',
+        cover,
+        station.url,
+        tag,
+        'radio'
+      );
+    });
+  }
+
+  private async loadRadioStations(): Promise<void> {
+    try {
+      const cached = await this.cacheService.get<Array<RadioStationEntry>>(this.radioStationCacheKey);
+      if (cached && cached.length > 0) {
+        this.radioItems = this.radioStationsToMediaItems(cached);
+        return;
+      }
+
+      const context = getContext() as common.Context;
+      const rawName: string = 'radio_stations_clean.json';
+      const rawBytes: Uint8Array = await context.resourceManager.getRawFileContent(rawName) as Uint8Array;
+      let content: string = '';
+      for (let i: number = 0; i < rawBytes.length; i++) {
+        content += String.fromCharCode(rawBytes[i]);
+      }
+      const parsed = JSON.parse(content) as RadioStationsFile;
+      const stations: RadioStationEntry[] = parsed.stations || [];
+      await this.cacheService.set(this.radioStationCacheKey, stations, 1000 * 60 * 60 * 12);
+      this.radioItems = this.radioStationsToMediaItems(stations);
+    } catch (err) {
+      console.error('[MediaModule] loadRadioStations failed:', JSON.stringify(err));
+      this.statusText = '电台数据加载失败';
+    }
   }
 
   private async loadLocalCache(): Promise<void> {
@@ -315,23 +385,19 @@ export struct MediaModule {
       this.rotateAngle = 0;
       this.isPlaying = autoplay;
       this.pendingAutoplay = autoplay;
-
-      const localItem = item;
-      this.defaultCoverVisible = false;
-      this.currentItem = localItem;
-      this.statusText = `本地缓存：${localItem.title}`;
+      this.statusText = item.mediaType === 'radio' ? `电台：${item.title}` : `本地缓存：${item.title}`;
       this.emptyHint = '';
-      this.isPlaying = autoplay;
+
       if (!this.avPlayer) {
         this.statusText = '播放器未就绪';
         return;
       }
-      const rawFile = await this.getRawFileDescriptor(localItem.source);
+      await this.avPlayer.reset();
+      const rawFile = await this.getRawFileDescriptor(item.source);
       if (!rawFile) {
-        this.statusText = '找不到本地音频资源';
+        this.statusText = item.mediaType === 'radio' ? '电台源暂未接入播放能力' : '找不到本地音频资源';
         return;
       }
-      await this.avPlayer.reset();
       this.avPlayer.fdSrc = rawFile;
       await this.avPlayer.prepare();
       this.pendingAutoplay = autoplay;
@@ -351,7 +417,7 @@ export struct MediaModule {
     }
 
     const localItem = this.currentItem as LocalMediaItem;
-    this.statusText = `本地缓存：${localItem.title}`;
+    this.statusText = localItem.mediaType === 'radio' ? `电台：${localItem.title}` : `本地缓存：${localItem.title}`;
 
     try {
       if (this.isPlaying) {
@@ -403,10 +469,8 @@ export struct MediaModule {
 
   private async switchTab(tab: TabType): Promise<void> {
     if (this.activeTab === tab) {
-      if (tab === TabType.MUSIC) {
-        this.searchResults = [];
-        this.searchKeyword = '';
-        this.isSearchPanelVisible = false;
+      if (tab === TabType.RADIO && this.radioItems.length <= 1) {
+        void this.loadRadioStations();
       }
       void this.loadLocalCache();
       return;
@@ -422,7 +486,11 @@ export struct MediaModule {
       this.searchKeyword = '';
       this.isSearchPanelVisible = false;
       this.emptyHint = '';
-      void this.loadLocalCache();
+      if (tab === TabType.RADIO && this.radioItems.length <= 1) {
+        void this.loadRadioStations();
+      } else {
+        void this.loadLocalCache();
+      }
       setTimeout(() => {
         this.contentOpacity = 1;
         this.contentOffset = 0;
@@ -439,9 +507,9 @@ export struct MediaModule {
     }
 
     this.searchResults = this.getCurrentList().filter((item) =>
-      item.title.includes(keyword) || item.artist.includes(keyword)
+      item.title.includes(keyword) || item.artist.includes(keyword) || item.tag.includes(keyword)
     );
-    this.statusText = this.searchResults.length > 0 ? `找到 ${this.searchResults.length} 条本地结果` : '未找到匹配歌曲';
+    this.statusText = this.searchResults.length > 0 ? `找到 ${this.searchResults.length} 条结果` : '未找到匹配内容';
 
     this.isSearchPanelVisible = false;
   }
@@ -480,17 +548,34 @@ export struct MediaModule {
   }
 
   @Builder
-  private PillButton(title: string, selected: boolean, onClickAction: () => void) {
-    Button(title)
-      .height(36)
-      .padding({ left: 16, right: 16 })
-      .backgroundColor(selected ? this.activeFill : 'rgba(255,255,255,0.08)')
-      .fontColor(selected ? '#08111F' : '#FFFFFF')
-      .fontWeight(FontWeight.Medium)
-      .border({ width: selected ? 1.2 : 0.6, color: selected ? this.activeTabBorder : 'rgba(255,255,255,0.12)' })
-      .borderRadius(18)
-      .shadow(selected ? { radius: 14, color: this.activeGlow, offsetY: 4 } : undefined)
-      .onClick(onClickAction)
+  private PillButton(title: string, selected: boolean, onClickAction: () => void, type: TabType) {
+    Stack({ alignContent: Alignment.Center }) {
+      Text(title)
+        .width('100%')
+        .height('100%')
+        .fontSize(12)
+        .fontColor('#FFFFFF')
+        .fontWeight(FontWeight.Bold)
+        .letterSpacing(1)
+        .textAlign(TextAlign.Center)
+    }
+    .width(78)
+    .height(34)
+    .padding(0)
+    .translate({ x: 0, y: this.tabPressed === type ? 10 : 0 })
+    .backgroundColor('rgba(255,255,255,0.08)')
+    .border({ width: 1.1, color: 'rgba(255,255,255,0.22)' })
+    .borderRadius(12)
+    .shadow({ radius: 6, color: selected ? 'rgba(96,165,250,0.12)' : 'rgba(0,0,0,0.06)', offsetY: 2 })
+    .animation({ duration: 120 })
+    .onTouch((event) => {
+      if (event.type === TouchType.Down) {
+        this.tabPressed = type;
+      } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+        this.tabPressed = null;
+      }
+    })
+    .onClick(onClickAction)
   }
 
   @Builder
@@ -529,8 +614,10 @@ export struct MediaModule {
     }
     .width('100%')
     .padding(12)
-    .backgroundColor('rgba(255,255,255,0.05)')
+    .backgroundColor('rgba(255,255,255,0.16)')
+    .border({ width: 1, color: 'rgba(255,255,255,0.34)' })
     .borderRadius(16)
+    .animation({ duration: 120 })
     .onClick(() => {
       void this.loadItem(item, true);
     })
@@ -556,24 +643,44 @@ export struct MediaModule {
           }
           .alignItems(HorizontalAlign.Start)
 
-          Button('搜索')
-            .height(34)
-            .fontSize(12)
-            .backgroundColor('#38BDF8')
-            .fontColor('#08111F')
-            .borderRadius(17)
-            .margin({ top: 24, bottom: 2 })
-            .onClick(() => {
-              this.openSearchPanel();
-            })
+          Stack({ alignContent: Alignment.Center }) {
+            Text('搜索')
+              .width('100%')
+              .height('100%')
+              .fontSize(12)
+              .fontWeight(FontWeight.Bold)
+              .fontColor('#FFFFFF')
+              .letterSpacing(1)
+              .textAlign(TextAlign.Center)
+          }
+          .width(78)
+          .height(34)
+          .padding(0)
+          .backgroundColor('rgba(72, 126, 255, 0.22)')
+          .border({ width: 1.1, color: 'rgba(191,219,254,0.70)' })
+          .borderRadius(12)
+          .shadow({ radius: 8, color: 'rgba(96,165,250,0.10)', offsetY: 2 })
+          .translate({ x: 0, y: this.controlPressed === 'search' ? 10 : 0 })
+          .animation({ duration: 120 })
+          .margin({ top: 24, bottom: 2 })
+          .onTouch((event) => {
+            if (event.type === TouchType.Down) {
+              this.controlPressed = 'search';
+            } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+              this.controlPressed = '';
+            }
+          })
+          .onClick(() => {
+            this.openSearchPanel();
+          })
         }
         .width('100%')
         .justifyContent(FlexAlign.SpaceBetween)
         .padding({ left: 18, right: 18, top: 10, bottom: 8 })
 
         Row({ space: 10 }) {
-          this.PillButton('音乐', this.activeTab === TabType.MUSIC, () => { void this.switchTab(TabType.MUSIC); })
-          this.PillButton('电台', this.activeTab === TabType.RADIO, () => { void this.switchTab(TabType.RADIO); })
+          this.PillButton('音乐', this.activeTab === TabType.MUSIC, () => { void this.switchTab(TabType.MUSIC); }, TabType.MUSIC)
+          this.PillButton('电台', this.activeTab === TabType.RADIO, () => { void this.switchTab(TabType.RADIO); }, TabType.RADIO)
         }
         .width('100%')
         .padding({ left: 18, right: 18, bottom: 8 })
@@ -604,7 +711,7 @@ export struct MediaModule {
                 TextInput({ placeholder: '搜索歌曲名或歌手名' })
                   .layoutWeight(1)
                   .height(42)
-                  .backgroundColor('rgba(11, 18, 32, 0.96)')
+                  .backgroundColor('rgba(11, 18, 32, 0.72)')
                   .fontColor('#FFFFFF')
                   .placeholderColor('rgba(255,255,255,0.45)')
                   .borderRadius(21)
@@ -613,23 +720,44 @@ export struct MediaModule {
                     this.onSearchKeywordChange(value);
                   })
 
-                Button('查找')
-                  .height(42)
-                  .margin({ left: 8 })
-                  .backgroundColor('#38BDF8')
-                  .fontColor('#08111F')
-                  .borderRadius(21)
-                  .onClick(() => {
-                    void this.searchOnlineResources();
-                  })
+                Stack({ alignContent: Alignment.Center }) {
+                  Text('查找')
+                    .width('100%')
+                    .height('100%')
+                    .fontSize(12)
+                    .fontWeight(FontWeight.Bold)
+                    .fontColor('#FFFFFF')
+                    .letterSpacing(1)
+                    .textAlign(TextAlign.Center)
+                }
+                .width(78)
+                .height(42)
+                .margin({ left: 8 })
+                .backgroundColor('rgba(72, 126, 255, 0.22)')
+                .border({ width: 1.1, color: 'rgba(191,219,254,0.70)' })
+                .borderRadius(12)
+                .shadow({ radius: 8, color: 'rgba(96,165,250,0.10)', offsetY: 2 })
+                .translate({ x: 0, y: this.controlPressed === 'find' ? 10 : 0 })
+                .animation({ duration: 120 })
+                .onTouch((event) => {
+                  if (event.type === TouchType.Down) {
+                    this.controlPressed = 'find';
+                  } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+                    this.controlPressed = '';
+                  }
+                })
+                .onClick(() => {
+                  void this.searchOnlineResources();
+                })
               }
               .width('100%')
             }
             .width('92%')
             .padding(14)
-            .backgroundColor('rgba(9, 15, 28, 0.98)')
+            .backgroundColor('rgba(9, 15, 28, 0.88)')
             .borderRadius(20)
-            .shadow({ radius: 16, color: 'rgba(0,0,0,0.35)', offsetY: 8 })
+            .border({ width: 1, color: 'rgba(255,255,255,0.34)' })
+            .shadow({ radius: 14, color: 'rgba(0,0,0,0.22)', offsetY: 8 })
           }
           .width('100%')
           .height('100%')
@@ -720,39 +848,84 @@ export struct MediaModule {
           }
           .width('100%')
           .padding(16)
-          .backgroundColor('rgba(255,255,255,0.06)')
+          .backgroundColor('rgba(255,255,255,0.14)')
           .borderRadius(20)
-          .border({ width: 1, color: 'rgba(255,255,255,0.10)' })
+          .border({ width: 1, color: 'rgba(255,255,255,0.34)' })
           .margin({ left: 18, right: 18, top: 2 })
           .opacity(this.contentOpacity)
           .translate({ x: 0, y: this.contentOffset })
 
           Row() {
             Row({ space: 10 }) {
-              Button('⏮')
-                .width(46)
-                .height(46)
-                .borderRadius(23)
-                .backgroundColor('rgba(255,255,255,0.08)')
-                .fontColor('#FFFFFF')
-                .onClick(() => { void this.playPrev(); })
+              Stack({ alignContent: Alignment.Center }) {
+                Text('⏮')
+                  .width('100%')
+                  .height('100%')
+                  .fontSize(18)
+                  .fontColor('#FFFFFF')
+                  .textAlign(TextAlign.Center)
+              }
+              .width(46)
+              .height(46)
+              .backgroundColor('rgba(255,255,255,0.16)')
+              .border({ width: 1.2, color: 'rgba(255,255,255,0.34)' })
+              .borderRadius(14)
+              .scale({ x: this.controlPressed === 'prev' ? 0.96 : 1, y: this.controlPressed === 'prev' ? 0.96 : 1 })
+              .onTouch((event) => {
+                if (event.type === TouchType.Down) {
+                  this.controlPressed = 'prev';
+                } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+                  this.controlPressed = '';
+                }
+              })
+              .onClick(() => { void this.playPrev(); })
 
-              Button(this.isPlaying ? '⏸' : '▶')
-                .width(62)
-                .height(62)
-                .borderRadius(31)
-                .backgroundColor('#38BDF8')
-                .fontColor('#08111F')
-                .fontWeight(FontWeight.Bold)
-                .onClick(() => { void this.togglePlay(); })
+              Stack({ alignContent: Alignment.Center }) {
+                Text(this.isPlaying ? '⏸' : '▶')
+                  .width('100%')
+                  .height('100%')
+                  .fontSize(18)
+                  .fontColor('#FFFFFF')
+                  .fontWeight(FontWeight.Bold)
+                  .textAlign(TextAlign.Center)
+              }
+              .width(62)
+              .height(62)
+              .backgroundColor('rgba(56,189,248,0.28)')
+              .border({ width: 1.2, color: 'rgba(96,165,250,0.95)' })
+              .borderRadius(18)
+              .scale({ x: this.controlPressed === 'play' ? 0.96 : 1, y: this.controlPressed === 'play' ? 0.96 : 1 })
+              .onTouch((event) => {
+                if (event.type === TouchType.Down) {
+                  this.controlPressed = 'play';
+                } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+                  this.controlPressed = '';
+                }
+              })
+              .onClick(() => { void this.togglePlay(); })
 
-              Button('⏭')
-                .width(46)
-                .height(46)
-                .borderRadius(23)
-                .backgroundColor('rgba(255,255,255,0.08)')
-                .fontColor('#FFFFFF')
-                .onClick(() => { void this.playNext(); })
+              Stack({ alignContent: Alignment.Center }) {
+                Text('⏭')
+                  .width('100%')
+                  .height('100%')
+                  .fontSize(18)
+                  .fontColor('#FFFFFF')
+                  .textAlign(TextAlign.Center)
+              }
+              .width(46)
+              .height(46)
+              .backgroundColor('rgba(255,255,255,0.16)')
+              .border({ width: 1.2, color: 'rgba(255,255,255,0.34)' })
+              .borderRadius(14)
+              .scale({ x: this.controlPressed === 'next' ? 0.96 : 1, y: this.controlPressed === 'next' ? 0.96 : 1 })
+              .onTouch((event) => {
+                if (event.type === TouchType.Down) {
+                  this.controlPressed = 'next';
+                } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+                  this.controlPressed = '';
+                }
+              })
+              .onClick(() => { void this.playNext(); })
             }
             .alignItems(VerticalAlign.Center)
 
@@ -797,7 +970,9 @@ export struct MediaModule {
           .width('100%')
           .padding({ left: 18, right: 18, top: 10, bottom: 10 })
           .margin({ left: 18, right: 18, top: 10 })
-          .backgroundColor('rgba(255,255,255,0.04)')
+          .backgroundColor('rgba(255,255,255,0.08)')
+          .backgroundBlurStyle(BlurStyle.Thin)
+          .border({ width: 1, color: 'rgba(255,255,255,0.16)' })
           .borderRadius(18)
           .opacity(this.contentOpacity)
           .translate({ x: 0, y: this.contentOffset })
