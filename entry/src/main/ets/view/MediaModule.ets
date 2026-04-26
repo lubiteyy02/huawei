@@ -106,6 +106,7 @@ export struct MediaModule {
   @State searchPressed: boolean = false;
   @State controlPressed: string = '';
   @State tabPressOffset: number = 0;
+  @State failedRadioIds: Array<string> = [];
 
   private avPlayer: media.AVPlayer | undefined;
   private pendingAutoplay: boolean = false;
@@ -184,7 +185,12 @@ export struct MediaModule {
   }
 
   private radioStationsToMediaItems(stations: RadioStationEntry[]): LocalMediaItem[] {
-    return stations.slice(0, 200).map((station, index) => {
+    const filteredStations = stations.filter((station) => {
+      const stationId = station.id || station.name;
+      return !this.failedRadioIds.includes(stationId);
+    });
+
+    return filteredStations.slice(0, 200).map((station, index) => {
       const cover = station.favicon && station.favicon.trim() !== ''
         ? station.favicon
         : this.defaultCover;
@@ -286,6 +292,7 @@ export struct MediaModule {
         } else if (state === 'playing') {
           this.isPlaying = true;
           if (this.currentItem && (this.currentItem.mediaType as string) === 'radio') {
+            this.radioIsPlaying = true;
             this.statusText = `电台：${this.currentItem.title}（播放中）`;
           } else {
             this.statusText = '正在播放';
@@ -293,10 +300,13 @@ export struct MediaModule {
           this.startAnimations();
         } else if (state === 'paused') {
           this.isPlaying = false;
+          this.radioIsPlaying = false;
           this.statusText = '已暂停';
           this.stopAnimations();
         } else if (state === 'completed') {
-          void this.playNext();
+          if (!this.currentItem || (this.currentItem.mediaType as string) !== 'radio') {
+            void this.playNext();
+          }
         }
       } catch (err) {
         console.error('[MediaModule] stateChange error:', JSON.stringify(err));
@@ -376,10 +386,10 @@ export struct MediaModule {
     return `${min}:${sec}`;
   }
 
-  private async loadItem(item: LocalMediaItem, autoplay: boolean = false): Promise<void> {
+  private async loadItem(item: LocalMediaItem, autoplay: boolean = false): Promise<boolean> {
     if (!this.avPlayer) {
       this.statusText = '播放器未就绪';
-      return;
+      return false;
     }
 
     try {
@@ -390,7 +400,7 @@ export struct MediaModule {
       this.totalTime = 0;
       this.progress = 0;
       this.rotateAngle = 0;
-      this.isPlaying = autoplay;
+      this.isPlaying = false;
       this.pendingAutoplay = autoplay;
       this.radioReady = false;
       this.statusText = item.mediaType === 'radio' ? `电台：${item.title}（准备中）` : `本地缓存：${item.title}`;
@@ -398,7 +408,7 @@ export struct MediaModule {
 
       if (!this.avPlayer) {
         this.statusText = '播放器未就绪';
-        return;
+        return false;
       }
       await this.avPlayer.reset();
       if (item.mediaType === 'radio') {
@@ -408,22 +418,39 @@ export struct MediaModule {
         if (autoplay) {
           await this.avPlayer.play();
           this.isPlaying = true;
+          this.radioIsPlaying = true;
           this.statusText = `电台：${item.title}（播放中）`;
+          this.pendingAutoplay = false;
+          return true;
         }
+        return true;
       } else {
         const rawFile = await this.getRawFileDescriptor(item.source);
         if (!rawFile) {
           this.statusText = '找不到本地音频资源';
-          return;
+          return false;
         }
         this.avPlayer.fdSrc = rawFile;
         await this.avPlayer.prepare();
+        if (autoplay) {
+          await this.avPlayer.play();
+          this.isPlaying = true;
+        }
+        return true;
       }
-      this.pendingAutoplay = autoplay;
     } catch (err) {
       console.error('[MediaModule] loadItem failed:', JSON.stringify(err));
       this.statusText = '加载失败';
       this.isPlaying = false;
+      this.radioIsPlaying = false;
+      if ((item.mediaType as string) === 'radio') {
+        const failedId = item.source;
+        if (!this.failedRadioIds.includes(failedId)) {
+          this.failedRadioIds = [...this.failedRadioIds, failedId];
+        }
+        return false;
+      }
+      return false;
     } finally {
       this.isLoading = false;
     }
@@ -448,6 +475,9 @@ export struct MediaModule {
       } else {
         this.pendingAutoplay = false;
         await this.avPlayer.play();
+        if ((localItem.mediaType as string) === 'radio') {
+          this.statusText = `电台：${localItem.title}（播放中）`;
+        }
       }
     } catch (err) {
       console.error('[MediaModule] togglePlay failed:', JSON.stringify(err));
