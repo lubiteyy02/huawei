@@ -80,6 +80,9 @@ export struct MediaModule {
   @State currentItem: LocalMediaItem | null = null;
   @State defaultCoverVisible: boolean = true;
   @State isPlaying: boolean = false;
+  @State musicIsPlaying: boolean = false;
+  @State radioIsPlaying: boolean = false;
+  @State radioReady: boolean = false;
   @State isLoading: boolean = false;
   @State currentTime: number = 0;
   @State totalTime: number = 0;
@@ -282,7 +285,11 @@ export struct MediaModule {
           }
         } else if (state === 'playing') {
           this.isPlaying = true;
-          this.statusText = '正在播放';
+          if (this.currentItem && (this.currentItem.mediaType as string) === 'radio') {
+            this.statusText = `电台：${this.currentItem.title}（播放中）`;
+          } else {
+            this.statusText = '正在播放';
+          }
           this.startAnimations();
         } else if (state === 'paused') {
           this.isPlaying = false;
@@ -385,7 +392,8 @@ export struct MediaModule {
       this.rotateAngle = 0;
       this.isPlaying = autoplay;
       this.pendingAutoplay = autoplay;
-      this.statusText = item.mediaType === 'radio' ? `电台：${item.title}` : `本地缓存：${item.title}`;
+      this.radioReady = false;
+      this.statusText = item.mediaType === 'radio' ? `电台：${item.title}（准备中）` : `本地缓存：${item.title}`;
       this.emptyHint = '';
 
       if (!this.avPlayer) {
@@ -393,13 +401,24 @@ export struct MediaModule {
         return;
       }
       await this.avPlayer.reset();
-      const rawFile = await this.getRawFileDescriptor(item.source);
-      if (!rawFile) {
-        this.statusText = item.mediaType === 'radio' ? '电台源暂未接入播放能力' : '找不到本地音频资源';
-        return;
+      if (item.mediaType === 'radio') {
+        this.avPlayer.url = item.source;
+        this.radioReady = true;
+        await this.avPlayer.prepare();
+        if (autoplay) {
+          await this.avPlayer.play();
+          this.isPlaying = true;
+          this.statusText = `电台：${item.title}（播放中）`;
+        }
+      } else {
+        const rawFile = await this.getRawFileDescriptor(item.source);
+        if (!rawFile) {
+          this.statusText = '找不到本地音频资源';
+          return;
+        }
+        this.avPlayer.fdSrc = rawFile;
+        await this.avPlayer.prepare();
       }
-      this.avPlayer.fdSrc = rawFile;
-      await this.avPlayer.prepare();
       this.pendingAutoplay = autoplay;
     } catch (err) {
       console.error('[MediaModule] loadItem failed:', JSON.stringify(err));
@@ -417,7 +436,11 @@ export struct MediaModule {
     }
 
     const localItem = this.currentItem as LocalMediaItem;
-    this.statusText = localItem.mediaType === 'radio' ? `电台：${localItem.title}` : `本地缓存：${localItem.title}`;
+    if ((localItem.mediaType as string) === 'radio') {
+      this.statusText = `电台：${localItem.title}（播放中）`;
+    } else {
+      this.statusText = `本地缓存：${localItem.title}`;
+    }
 
     try {
       if (this.isPlaying) {
@@ -472,30 +495,43 @@ export struct MediaModule {
       if (tab === TabType.RADIO && this.radioItems.length <= 1) {
         void this.loadRadioStations();
       }
-      void this.loadLocalCache();
       return;
     }
 
-    this.contentOpacity = 0;
-    this.contentOffset = 14;
-    setTimeout(() => {
-      this.activeTab = tab;
-      this.updateAccent();
-      this.statusText = tab === TabType.MUSIC ? '当前为音乐模式' : '当前为电台模式';
-      this.searchResults = [];
-      this.searchKeyword = '';
-      this.isSearchPanelVisible = false;
-      this.emptyHint = '';
-      if (tab === TabType.RADIO && this.radioItems.length <= 1) {
-        void this.loadRadioStations();
-      } else {
-        void this.loadLocalCache();
+    this.stopAnimations();
+    this.isPlaying = false;
+    this.musicIsPlaying = false;
+    this.radioIsPlaying = false;
+    this.radioReady = false;
+    this.pendingAutoplay = false;
+    this.currentItem = null;
+    this.defaultCoverVisible = true;
+    this.currentTime = 0;
+    this.totalTime = 0;
+    this.progress = 0;
+    this.rotateAngle = 0;
+    if (this.avPlayer) {
+      try {
+        await this.avPlayer.pause();
+        await this.avPlayer.reset();
+      } catch (err) {
+        console.error('[MediaModule] switchTab reset failed:', JSON.stringify(err));
       }
-      setTimeout(() => {
-        this.contentOpacity = 1;
-        this.contentOffset = 0;
-      }, 80);
-    }, 120);
+    }
+
+    this.activeTab = tab;
+    this.updateAccent();
+    this.statusText = tab === TabType.MUSIC ? '当前为音乐模式' : '当前为电台模式';
+    this.searchResults = [];
+    this.searchKeyword = '';
+    this.isSearchPanelVisible = false;
+    this.emptyHint = '';
+
+    if (tab === TabType.RADIO && this.radioItems.length <= 1) {
+      void this.loadRadioStations();
+    } else {
+      void this.loadLocalCache();
+    }
   }
 
   private async searchOnlineResources(): Promise<void> {
