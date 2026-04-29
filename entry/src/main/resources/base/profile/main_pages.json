@@ -6,6 +6,10 @@
     "pages/LoginPage",
     "pages/RegisterPage",
     "pages/FavoritesPage",
-    "pages/HistoryPage"
+    "pages/HistoryPage",
+    "pages/CollaborationContactsPage",
+    "pages/CollaborationSmsPage",
+    "pages/CollaborationMusicPage",
+    "pages/CollaborationResumePage"
   ]
 }
