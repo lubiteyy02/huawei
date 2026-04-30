@@ -8,6 +8,7 @@ import * as locationController from '../controllers/locationController';
 import * as feedbackController from '../controllers/feedbackController';
 import * as frequentLocationController from '../controllers/frequentLocationController';
 import * as mediaController from '../controllers/mediaController';
+import * as collaborationController from '../controllers/collaborationController';
 
 const router = express.Router();
 
@@ -64,6 +65,17 @@ router.get('/frequent-locations/stats', authMiddleware, frequentLocationControll
 router.get('/frequent-locations/:id', authMiddleware, frequentLocationController.getLocationDetail);
 router.put('/frequent-locations/:id', authMiddleware, frequentLocationController.updateLocation);
 router.delete('/frequent-locations/:id', authMiddleware, frequentLocationController.deleteLocation);
+
+// ========== 协同同步相关路由 ==========
+router.get('/sync/overview', collaborationController.getOverview);
+router.get('/sync/contacts', collaborationController.getContacts);
+router.post('/sync/contacts/tag', collaborationController.updateContactTag);
+router.get('/sync/messages', collaborationController.getMessageThreads);
+router.post('/sync/messages/read', collaborationController.markMessageRead);
+router.get('/sync/music/library', collaborationController.getMusicLibrary);
+router.get('/sync/continuation/list', collaborationController.getContinuationList);
+router.post('/sync/continuation/resume', collaborationController.resumeContinuation);
+router.post('/sync/music/state', collaborationController.updateMusicState);
 
 // ========== 多媒体资源相关路由 ==========
 router.get('/media/resources', mediaController.getMediaResources);

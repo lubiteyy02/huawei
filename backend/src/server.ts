@@ -1,9 +1,11 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import http from 'http';
 import routes from './routes';
 import { testConnection } from './config/database';
 import { getLocalIPv4 } from './utils/network';
+import { initializeCollaborationSyncHub } from './services/collaborationSyncHub';
 
 // 加载环境变量
 dotenv.config();
@@ -61,9 +63,12 @@ async function startServer() {
       console.error('❌ 数据库连接失败，服务器启动中止');
       process.exit(1);
     }
+
+    const server = http.createServer(app);
+    initializeCollaborationSyncHub(server);
     
     // 启动HTTP服务
-    app.listen(PORT, '0.0.0.0', () => {
+    server.listen(PORT, '0.0.0.0', () => {
       console.log('');
       console.log('🚀 ========================================');
       console.log(`🚀 车载导航系统后端服务已启动`);
@@ -72,6 +77,7 @@ async function startServer() {
       console.log(`🚀 服务地址: http://${localIP}:${PORT}`);
       console.log(`🚀 API文档: http://${localIP}:${PORT}/api/v1`);
       console.log(`🚀 健康检查: http://${localIP}:${PORT}/health`);
+      console.log(`🚀 WebSocket: ws://${localIP}:${PORT}/api/v1/sync/ws`);
       console.log('🚀 ========================================');
       console.log('');
     });
