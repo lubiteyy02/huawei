@@ -119,12 +119,29 @@ let musicState: MusicState = {
 
 let continuationCompletedIds: number[] = [];
 
+const LOG_CAP = 8;
+
 function wrap<T>(data: T): CollaborationResponse<T> {
   return {
     code: 0,
     message: 'ok',
     data
   };
+}
+
+function appendLog(message: string): void {
+  const stamp = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  overview.logs = [`${message} · ${stamp}`, ...overview.logs].slice(0, LOG_CAP);
+  overview.lastSyncTime = new Date().toISOString();
+}
+
+export function addLog(req: Request, res: Response) {
+  const body = (req.body || {}) as { message?: string; sourceLabel?: string };
+  const message = typeof body.message === 'string' && body.message.trim() !== '' ? body.message : '手动触发同步';
+  const label = typeof body.sourceLabel === 'string' && body.sourceLabel.trim() !== '' ? body.sourceLabel : (req.header('X-Device-Id') ?? 'unknown');
+  appendLog(`[${label}] ${message}`);
+  broadcastEvent(createSyncEvent('overview.refreshed', { logsHead: overview.logs[0] }, req.header('X-Device-Id') ?? undefined, req.header('X-User-Id') ?? undefined));
+  res.json(wrap({ version: Date.now(), logs: overview.logs }));
 }
 
 export function getOverview(req: Request, res: Response) {
@@ -188,6 +205,19 @@ export function resumeContinuation(req: Request, res: Response) {
   overview.logs = [`续接任务完成：${body.continuationId}`, ...overview.logs].slice(0, 4);
   broadcastEvent(createSyncEvent('continuation.resumed', { continuationId: body.continuationId }, req.header('X-Device-Id') ?? undefined, req.header('X-User-Id') ?? undefined));
   res.json(wrap({ version: Date.now() }));
+}
+
+export function getMusicState(req: Request, res: Response) {
+  const meta = musicItems.find((item) => item.id === musicState.songId);
+  res.json(wrap({
+    songId: musicState.songId,
+    playing: musicState.playing,
+    position: musicState.position,
+    updatedAt: musicState.updatedAt,
+    title: meta ? meta.title : '',
+    artist: meta ? meta.artist : '',
+    sourceDevice: meta ? meta.device : ''
+  }));
 }
 
 export function updateMusicState(req: Request, res: Response) {

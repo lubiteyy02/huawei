@@ -76,6 +76,8 @@ router.get('/sync/music/library', collaborationController.getMusicLibrary);
 router.get('/sync/continuation/list', collaborationController.getContinuationList);
 router.post('/sync/continuation/resume', collaborationController.resumeContinuation);
 router.post('/sync/music/state', collaborationController.updateMusicState);
+router.get('/sync/music/state', collaborationController.getMusicState);
+router.post('/sync/log', collaborationController.addLog);
 
 // ========== 多媒体资源相关路由 ==========
 router.get('/media/resources', mediaController.getMediaResources);
