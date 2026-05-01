@@ -8,6 +8,8 @@ export interface CollaborationSyncEvent {
   userId?: string;
   payload: Record<string, string | number | boolean | null>;
   timestamp: string;
+  scope: 'overview' | 'contacts' | 'messages' | 'music' | 'continuation' | 'log';
+  refreshTargets: Array<'overview' | 'contacts' | 'messages' | 'music' | 'continuation' | 'log'>;
 }
 
 interface CollaborationSocketMessage {
@@ -90,13 +92,17 @@ export function createSyncEvent(
   type: CollaborationSyncEventType,
   payload: Record<string, string | number | boolean | null>,
   sourceDeviceId?: string,
-  userId?: string
+  userId?: string,
+  scope: CollaborationSyncEvent['scope'] = 'overview',
+  refreshTargets: CollaborationSyncEvent['refreshTargets'] = ['overview']
 ): CollaborationSyncEvent {
   return {
     type,
     payload,
     sourceDeviceId,
     userId,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    scope,
+    refreshTargets
   };
 }

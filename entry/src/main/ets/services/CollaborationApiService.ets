@@ -82,6 +82,11 @@ class VersionResponse {
   version: number = 0;
 }
 
+class CollaborationLogResponse {
+  version: number = 0;
+  logs: string[] = [];
+}
+
 export class MusicStateSnapshot {
   songId: number = 0;
   playing: boolean = false;
@@ -217,7 +222,7 @@ export class CollaborationApiService {
     const body = new AddLogRequest()
     body.message = message
     body.sourceLabel = sourceLabel
-    const res = await this.requestJson<CollaborationSyncPayload<{ version: number; logs: string[] }>>('/api/v1/sync/log', http.RequestMethod.POST, JSON.stringify(body))
+    const res = await this.requestJson<CollaborationSyncPayload<CollaborationLogResponse>>('/api/v1/sync/log', http.RequestMethod.POST, JSON.stringify(body))
     return res && res.code === 0 ? res.data.logs : null
   }
 
@@ -243,3 +248,5 @@ export class CollaborationApiService {
     return !!(res && res.code === 0)
   }
 }
+
+

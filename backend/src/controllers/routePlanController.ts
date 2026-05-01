@@ -40,8 +40,7 @@ export async function getRoutePlans(req: Request, res: Response) {
       sql += ' AND is_favorite = TRUE';
     }
     
-    sql += ' ORDER BY use_count DESC, created_at DESC LIMIT ? OFFSET ?';
-    params.push(Number(pageSize), offset);
+    sql += ` ORDER BY use_count DESC, created_at DESC LIMIT ${Number(pageSize)} OFFSET ${Number(offset)}`;
     
     const plans = await query<RoutePlan[]>(sql, params);
     

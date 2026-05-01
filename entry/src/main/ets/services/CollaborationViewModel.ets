@@ -1,6 +1,7 @@
 import { CollaborationDataService, type CollaborationContact, type CollaborationMessageThread, type CollaborationMusicItem, type CollaborationContinuationTask } from './CollaborationDataService'
 import type { CollaborationBackendConfig, MusicStateSnapshot } from './CollaborationApiService'
 import { CollaborationSyncSocketService, type CollaborationSyncEvent, type CollaborationSyncEventListener } from './CollaborationSyncSocketService'
+import { RealMusicBridgeService } from './RealMusicBridgeService'
 
 export class CollaborationViewModel {
   private static instance: CollaborationViewModel | null = null
@@ -9,6 +10,7 @@ export class CollaborationViewModel {
   private readonly socketListener: CollaborationSyncEventListener = (event: CollaborationSyncEvent): void => {
     this.handleSyncEvent(event)
   }
+  private musicBridge: RealMusicBridgeService | null = null
 
   static getInstance(): CollaborationViewModel {
     if (!CollaborationViewModel.instance) {
@@ -27,6 +29,23 @@ export class CollaborationViewModel {
   }
 
   private handleSyncEvent(event: CollaborationSyncEvent): void {
+    if (event.type === 'music.stateChanged') {
+      const songId = typeof event.payload.songId === 'number' ? event.payload.songId : 0
+      const playing = event.payload.playing === 1 || event.payload.playing === true
+      const position = typeof event.payload.position === 'number' ? event.payload.position : 0
+      if (!this.musicBridge) {
+        this.musicBridge = RealMusicBridgeService.getInstance()
+      }
+      this.musicBridge.updateFromSession({
+        songId,
+        title: '',
+        artist: '',
+        playing,
+        position,
+        sourceDevice: event.sourceDeviceId ?? 'phone'
+      })
+      return
+    }
     void event
   }
 

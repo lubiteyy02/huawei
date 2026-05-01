@@ -1,5 +1,20 @@
 import { Request, Response } from 'express';
 import { broadcastEvent, createSyncEvent } from '../services/collaborationSyncHub';
+import {
+  completeContinuationTask,
+  getMusicStateRecord,
+  getOverviewRecord,
+  insertSyncLog,
+  listContacts,
+  listContinuationTasks,
+  listMusicLibrary,
+  listThreads,
+  markThreadRead,
+  recentLogs,
+  saveMusicStateRecord,
+  saveOverviewRecord,
+  updateContactTagById
+} from '../repositories/collaborationRepository';
 
 interface CollaborationOverview {
   phoneName: string;
@@ -55,6 +70,9 @@ interface MusicState {
   playing: boolean;
   position: number;
   updatedAt: string;
+  title?: string;
+  artist?: string;
+  sourceDevice?: string;
 }
 
 interface ContactUpdateRequest {
@@ -70,168 +88,156 @@ interface ContinuationResumeRequest {
   continuationId: number;
 }
 
-const overview: CollaborationOverview = {
-  phoneName: 'Harmony Phone',
-  carName: 'Harmony Car',
-  syncStatus: '已连接',
-  lastSyncTime: new Date().toISOString(),
-  unreadMessages: 3,
-  contactCount: 128,
-  musicCount: 56,
-  continuationCount: 2,
-  logs: [
-    '联系人：已同步 128 条',
-    '短信：已同步最近 20 条会话',
-    '音乐：已续接播放《七里香》',
-    '应用续接：导航任务已同步到车机'
-  ]
-};
+interface MusicStateRequest {
+  songId: number;
+  playing: boolean;
+  position: number;
+  updatedAt?: string;
+}
 
-let contacts: CollaborationContact[] = [
-  { id: 1, name: '李明', phone: '138-0000-0001', tag: '常用' },
-  { id: 2, name: '王婷', phone: '138-0000-0002', tag: '最近' },
-  { id: 3, name: '张伟', phone: '138-0000-0003', tag: '收藏' }
-];
-
-let threads: CollaborationMessageThread[] = [
-  { id: 1, name: '妈妈', preview: '路上注意安全，到家告诉我', time: '09:12', unread: 1 },
-  { id: 2, name: '同事-小周', preview: '会议资料已经发到群里了', time: '08:40', unread: 0 },
-  { id: 3, name: '物业', preview: '明天早上停水，请提前储水', time: '昨天', unread: 2 }
-];
-
-let musicItems: CollaborationMusicItem[] = [
-  { id: 1, title: '七里香', artist: '周杰伦', progress: 64, device: '手机正在播放' },
-  { id: 2, title: '稻香', artist: '周杰伦', progress: 22, device: '车机可续接' },
-  { id: 3, title: '晴天', artist: '周杰伦', progress: 89, device: '最近播放' }
-];
-
-let continuationTasks: CollaborationContinuationTask[] = [
-  { id: 1, module: '导航', title: '去公司', detail: '已在手机上规划路线', device: '手机' },
-  { id: 2, module: '音乐', title: '七里香', detail: '播放进度 01:08', device: '手机' }
-];
-
-let musicState: MusicState = {
-  songId: 1,
-  playing: true,
-  position: 68000,
-  updatedAt: new Date().toISOString()
-};
-
-let continuationCompletedIds: number[] = [];
-
-const LOG_CAP = 8;
+interface LogResponse {
+  version: number;
+  logs: string[];
+}
 
 function wrap<T>(data: T): CollaborationResponse<T> {
+  return { code: 0, message: 'ok', data };
+}
+
+function parseLogs(value: string | null): string[] {
+  if (!value) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value) as string[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function loadOverview(): Promise<CollaborationOverview> {
+  const record = await getOverviewRecord();
+  const recent = await recentLogs(8);
   return {
-    code: 0,
-    message: 'ok',
-    data
+    phoneName: record ? record.phoneName : 'Harmony Phone',
+    carName: record ? record.carName : 'Harmony Car',
+    syncStatus: record ? record.syncStatus : '已连接',
+    lastSyncTime: record ? record.lastSyncTime : new Date().toISOString(),
+    unreadMessages: record ? record.unreadMessages : 0,
+    contactCount: record ? record.contactCount : 0,
+    musicCount: record ? record.musicCount : 0,
+    continuationCount: record ? record.continuationCount : 0,
+    logs: recent.length > 0 ? recent.map((item) => `[${item.sourceLabel}] ${item.messageText}`) : parseLogs(record ? record.logsJson : null)
   };
 }
 
-function appendLog(message: string): void {
-  const stamp = new Date().toLocaleTimeString('zh-CN', { hour12: false });
-  overview.logs = [`${message} · ${stamp}`, ...overview.logs].slice(0, LOG_CAP);
-  overview.lastSyncTime = new Date().toISOString();
-}
-
-export function addLog(req: Request, res: Response) {
+export async function addLog(req: Request, res: Response) {
   const body = (req.body || {}) as { message?: string; sourceLabel?: string };
   const message = typeof body.message === 'string' && body.message.trim() !== '' ? body.message : '手动触发同步';
   const label = typeof body.sourceLabel === 'string' && body.sourceLabel.trim() !== '' ? body.sourceLabel : (req.header('X-Device-Id') ?? 'unknown');
-  appendLog(`[${label}] ${message}`);
-  broadcastEvent(createSyncEvent('overview.refreshed', { logsHead: overview.logs[0] }, req.header('X-Device-Id') ?? undefined, req.header('X-User-Id') ?? undefined));
-  res.json(wrap({ version: Date.now(), logs: overview.logs }));
-}
-
-export function getOverview(req: Request, res: Response) {
-  res.json(wrap({
-    ...overview,
+  await insertSyncLog(message, label);
+  const overview = await loadOverview();
+  await saveOverviewRecord({
     lastSyncTime: new Date().toISOString(),
-    logs: overview.logs
-  }));
+    logsJson: JSON.stringify(overview.logs.slice(0, 8))
+  });
+  broadcastEvent(createSyncEvent('overview.refreshed', { logsHead: overview.logs[0] ?? '' }, req.header('X-Device-Id') ?? undefined, req.header('X-User-Id') ?? undefined, 'log', ['overview', 'log']));
+  res.json(wrap<LogResponse>({ version: Date.now(), logs: overview.logs }));
 }
 
-export function getContacts(req: Request, res: Response) {
-  res.json(wrap(contacts));
+export async function getOverview(req: Request, res: Response) {
+  res.json(wrap(await loadOverview()));
 }
 
-export function updateContactTag(req: Request, res: Response) {
+export async function getContacts(req: Request, res: Response) {
+  const rows = await listContacts();
+  res.json(wrap(rows.map((item) => ({ id: item.id, name: item.name, phone: item.phone, tag: item.tag }))));
+}
+
+export async function updateContactTag(req: Request, res: Response) {
   const body = req.body as ContactUpdateRequest;
-  const contact = contacts.find((item) => item.id === body.id);
+  const contactRows = await listContacts();
+  const contact = contactRows.find((item) => item.id === body.id);
   if (!contact) {
     res.status(404).json({ code: 404, message: 'contact not found', data: { version: Date.now() } });
     return;
   }
 
-  contact.tag = body.tag;
-  overview.logs = [`联系人已更新：${contact.name} → ${body.tag}`, ...overview.logs].slice(0, 4);
-  broadcastEvent(createSyncEvent('contact.updated', { id: contact.id, tag: contact.tag }, req.header('X-Device-Id') ?? undefined, req.header('X-User-Id') ?? undefined));
+  await updateContactTagById(body.id, body.tag);
+  const overview = await loadOverview();
+  const updatedLogs = [`联系人已更新：${contact.name} → ${body.tag}`, ...overview.logs].slice(0, 8);
+  await saveOverviewRecord({ logsJson: JSON.stringify(updatedLogs), lastSyncTime: new Date().toISOString() });
+  broadcastEvent(createSyncEvent('contact.updated', { id: contact.id, tag: body.tag }, req.header('X-Device-Id') ?? undefined, req.header('X-User-Id') ?? undefined, 'contacts', ['contacts', 'overview', 'log']));
   res.json(wrap({ version: Date.now() }));
 }
 
-export function getMessageThreads(req: Request, res: Response) {
-  res.json(wrap(threads));
+export async function getMessageThreads(req: Request, res: Response) {
+  const rows = await listThreads();
+  res.json(wrap(rows.map((item) => ({ id: item.id, name: item.name, preview: item.preview, time: item.timeText, unread: item.unread }))));
 }
 
-export function markMessageRead(req: Request, res: Response) {
+export async function markMessageRead(req: Request, res: Response) {
   const body = req.body as MessageReadRequest;
-  const thread = threads.find((item) => item.id === body.threadId);
+  const rows = await listThreads();
+  const thread = rows.find((item) => item.id === body.threadId);
   if (!thread) {
     res.status(404).json({ code: 404, message: 'thread not found', data: { version: Date.now() } });
     return;
   }
 
-  thread.unread = 0;
-  overview.unreadMessages = Math.max(0, overview.unreadMessages - 1);
-  overview.logs = [`短信已读：${thread.name}`, ...overview.logs].slice(0, 4);
-  broadcastEvent(createSyncEvent('message.read', { threadId: thread.id, unread: thread.unread }, req.header('X-Device-Id') ?? undefined, req.header('X-User-Id') ?? undefined));
+  await markThreadRead(body.threadId);
+  const overview = await loadOverview();
+  const updatedLogs = [`短信已读：${thread.name}`, ...overview.logs].slice(0, 8);
+  await saveOverviewRecord({ logsJson: JSON.stringify(updatedLogs), lastSyncTime: new Date().toISOString() });
+  broadcastEvent(createSyncEvent('message.read', { threadId: thread.id, unread: 0 }, req.header('X-Device-Id') ?? undefined, req.header('X-User-Id') ?? undefined, 'messages', ['messages', 'overview', 'log']));
   res.json(wrap({ version: Date.now() }));
 }
 
-export function getMusicLibrary(req: Request, res: Response) {
-  res.json(wrap(musicItems));
+export async function getMusicLibrary(req: Request, res: Response) {
+  const rows = await listMusicLibrary();
+  res.json(wrap(rows.map((item) => ({ id: item.id, title: item.title, artist: item.artist, progress: item.progress, device: item.device }))));
 }
 
-export function getContinuationList(req: Request, res: Response) {
-  const filtered = continuationTasks.filter((task) => !continuationCompletedIds.includes(task.id));
-  res.json(wrap(filtered));
+export async function getContinuationList(req: Request, res: Response) {
+  const rows = await listContinuationTasks();
+  res.json(wrap(rows.map((item) => ({ id: item.id, module: item.moduleName, title: item.title, detail: item.detailText, device: item.deviceName }))));
 }
 
-export function resumeContinuation(req: Request, res: Response) {
+export async function resumeContinuation(req: Request, res: Response) {
   const body = req.body as ContinuationResumeRequest;
-  continuationCompletedIds = [...continuationCompletedIds, body.continuationId];
-  overview.continuationCount = Math.max(0, overview.continuationCount - 1);
-  overview.logs = [`续接任务完成：${body.continuationId}`, ...overview.logs].slice(0, 4);
-  broadcastEvent(createSyncEvent('continuation.resumed', { continuationId: body.continuationId }, req.header('X-Device-Id') ?? undefined, req.header('X-User-Id') ?? undefined));
+  await completeContinuationTask(body.continuationId);
+  const overview = await loadOverview();
+  const updatedLogs = [`续接任务完成：${body.continuationId}`, ...overview.logs].slice(0, 8);
+  await saveOverviewRecord({ logsJson: JSON.stringify(updatedLogs), lastSyncTime: new Date().toISOString() });
+  broadcastEvent(createSyncEvent('continuation.resumed', { continuationId: body.continuationId }, req.header('X-Device-Id') ?? undefined, req.header('X-User-Id') ?? undefined, 'continuation', ['continuation', 'overview', 'log']));
   res.json(wrap({ version: Date.now() }));
 }
 
-export function getMusicState(req: Request, res: Response) {
-  const meta = musicItems.find((item) => item.id === musicState.songId);
+export async function getMusicState(req: Request, res: Response) {
+  const rows = await listMusicLibrary();
+  const state = await getMusicStateRecord();
+  const meta = rows.find((item) => item.id === (state ? state.songId : 0));
   res.json(wrap({
-    songId: musicState.songId,
-    playing: musicState.playing,
-    position: musicState.position,
-    updatedAt: musicState.updatedAt,
+    songId: state ? state.songId : 0,
+    playing: state ? state.playing === 1 : false,
+    position: state ? state.position : 0,
+    updatedAt: state ? state.updatedAt : new Date().toISOString(),
     title: meta ? meta.title : '',
     artist: meta ? meta.artist : '',
-    sourceDevice: meta ? meta.device : ''
+    sourceDevice: state ? state.sourceDevice : ''
   }));
 }
 
-export function updateMusicState(req: Request, res: Response) {
-  const { songId, playing, position, updatedAt } = req.body || {};
-
-  if (typeof songId === 'number') {
-    musicState = {
-      songId,
-      playing: !!playing,
-      position: typeof position === 'number' ? position : 0,
-      updatedAt: typeof updatedAt === 'string' ? updatedAt : new Date().toISOString()
-    };
-    broadcastEvent(createSyncEvent('music.stateChanged', { songId: musicState.songId, playing: musicState.playing ? 1 : 0, position: musicState.position }, req.header('X-Device-Id') ?? undefined, req.header('X-User-Id') ?? undefined));
-  }
-
-  res.json(wrap({ version: Date.now(), musicState }));
+export async function updateMusicState(req: Request, res: Response) {
+  const body = req.body as MusicStateRequest;
+  const rows = await listMusicLibrary();
+  const meta = rows.find((item) => item.id === body.songId);
+  const updatedAt = typeof body.updatedAt === 'string' ? body.updatedAt : new Date().toISOString();
+  await saveMusicStateRecord(body.songId, body.playing, body.position, req.header('X-Device-Id') ?? 'unknown', updatedAt);
+  const overview = await loadOverview();
+  const updatedLogs = [`音乐状态更新：${meta ? meta.title : body.songId}`, ...overview.logs].slice(0, 8);
+  await saveOverviewRecord({ logsJson: JSON.stringify(updatedLogs), lastSyncTime: new Date().toISOString() });
+  broadcastEvent(createSyncEvent('music.stateChanged', { songId: body.songId, playing: body.playing ? 1 : 0, position: body.position }, req.header('X-Device-Id') ?? undefined, req.header('X-User-Id') ?? undefined, 'music', ['music', 'overview', 'log']));
+  res.json(wrap({ version: Date.now(), musicState: { songId: body.songId, playing: body.playing, position: body.position, updatedAt } }));
 }

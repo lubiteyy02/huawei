@@ -33,10 +33,13 @@ async function main() {
     port: dbPort,
     user: dbUser,
     password: dbPassword,
+    database: dbName,
     multipleStatements: true
   });
 
   try {
+    await connection.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\``);
+    await connection.query(`USE \`${dbName}\``);
     await connection.query(sql);
     console.log('✅ 数据库初始化完成');
     console.log(`✅ 数据库名称: ${dbName}`);

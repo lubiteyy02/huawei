@@ -5,13 +5,13 @@
         "name": "default",
         "type": "HarmonyOS",
         "material": {
-          "certpath": "C:/Users/47346/.ohos/config/default_huawei_cRMNfHXY-rs26j-q-zNVGBldn0KXM7M0d9PwOBtHi6g=.cer",
+          "certpath": "C:\\Users\\47346\\.ohos\\config\\default_huawei_cRMNfHXY-rs26j-q-zNVGBldn0KXM7M0d9PwOBtHi6g=.cer",
           "keyAlias": "debugKey",
-          "keyPassword": "0000001B30D44C2459B9363E29CEE02ED3C48E620F21CC34C84A86B43CB569DF406FCAE84BE0762B786EBF",
-          "profile": "C:/Users/47346/.ohos/config/default_huawei_cRMNfHXY-rs26j-q-zNVGBldn0KXM7M0d9PwOBtHi6g=.p7b",
+          "keyPassword": "0000001B8C1178AED20966ECE46859CAB8EAE315C455B9F2CDC7C9049EF946819D04F19E627EC13A14086D",
+          "profile": "C:\\Users\\47346\\.ohos\\config\\default_huawei_cRMNfHXY-rs26j-q-zNVGBldn0KXM7M0d9PwOBtHi6g=.p7b",
           "signAlg": "SHA256withECDSA",
-          "storeFile": "C:/Users/47346/.ohos/config/default_huawei_cRMNfHXY-rs26j-q-zNVGBldn0KXM7M0d9PwOBtHi6g=.p12",
-          "storePassword": "0000001BDF41925EA305DD62AD1377391BF6CA77B818A3F220DB2DBC195B6F860A9A357CF42DC8FA4A8C97"
+          "storeFile": "C:\\Users\\47346\\.ohos\\config\\default_huawei_cRMNfHXY-rs26j-q-zNVGBldn0KXM7M0d9PwOBtHi6g=.p12",
+          "storePassword": "0000001B00E30CC140B8F108E8BDAAE87E2BFA6FF7336826A546FC7834F80C5891AFFC3521B7C06B9EA794"
         }
       }
     ],
@@ -19,8 +19,10 @@
       {
         "name": "default",
         "signingConfig": "default",
-        "targetSdkVersion": "6.0.1(21)",
-        "compatibleSdkVersion": "6.0.1(21)",
+        "targetSdkVersion": "6.0.2(22)",
+        "compatibleSdkVersion": "5.0.5(17)",
+        "compileSdkVersion": "6.0.2(22)",
+        "arkTSVersion": "1.1",
         "runtimeOS": "HarmonyOS",
         "buildOption": {
           "strictMode": {
@@ -32,7 +34,7 @@
     ],
     "buildModeSet": [
       {
-        "name": "debug",
+        "name": "debug"
       },
       {
         "name": "release"

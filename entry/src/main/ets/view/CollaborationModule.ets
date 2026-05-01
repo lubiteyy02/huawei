@@ -1,5 +1,5 @@
 import router from '@ohos.router'
-import deviceInfo from '@ohos.deviceInfo'
+import { deviceInfo } from '@kit.BasicServicesKit'
 import { CollaborationViewModel } from '../services/CollaborationViewModel'
 import { CollaborationBackendConfig } from '../services/CollaborationApiService'
 import type { CollaborationSyncEvent } from '../services/CollaborationSyncSocketService'
@@ -41,7 +41,38 @@ export struct CollaborationModule {
   private readonly viewModel: CollaborationViewModel = CollaborationViewModel.getInstance();
   private readonly syncListener: (event: CollaborationSyncEvent) => void = (event: CollaborationSyncEvent): void => {
     this.syncHint = `${event.type} · ${event.timestamp}`;
-    void this.refreshOverview();
+    if (event.type === 'contact.updated') {
+      const tag = typeof event.payload.tag === 'string' ? event.payload.tag : '';
+      this.contactCount = this.contactCount;
+      if (tag !== '') {
+        this.logs = [`联系人已更新：${tag} · ${this.formatTimeText()}`, ...this.logs].slice(0, 8);
+      }
+      this.syncStatus = '已连接';
+      return;
+    }
+    if (event.type === 'message.read') {
+      const unread = typeof event.payload.unread === 'number' ? event.payload.unread : 0;
+      this.unreadMessages = Math.max(0, this.unreadMessages - unread);
+      this.logs = [`短信状态已同步 · ${this.formatTimeText()}`, ...this.logs].slice(0, 8);
+      this.syncStatus = '已连接';
+      return;
+    }
+    if (event.type === 'music.stateChanged') {
+      const playing = event.payload.playing === 1 || event.payload.playing === true;
+      const position = typeof event.payload.position === 'number' ? event.payload.position : 0;
+      const songId = typeof event.payload.songId === 'number' ? event.payload.songId : 0;
+      this.syncHint = `音乐刷新 · ${songId > 0 ? songId : '未知歌曲'} · ${playing ? '播放中' : '已暂停'}`;
+      this.logs = [`音乐状态已更新 · ${this.formatTimeText()}`, ...this.logs].slice(0, 8);
+      this.syncStatus = '已连接';
+      return;
+    }
+    if (event.type === 'continuation.resumed') {
+      this.continuationCount = Math.max(0, this.continuationCount - 1);
+      this.logs = [`续接任务已完成 · ${this.formatTimeText()}`, ...this.logs].slice(0, 8);
+      this.syncStatus = '已连接';
+      return;
+    }
+    this.logs = [`总览已刷新 · ${this.formatTimeText()}`, ...this.logs].slice(0, 8);
   };
 
   private readonly deviceCards: DeviceStatusCard[] = [
@@ -132,8 +163,58 @@ export struct CollaborationModule {
       this.continuationCount = overview.continuationCount;
       this.logs = overview.logs;
       this.errorMessage = '';
+      this.syncHint = `总览刷新 · ${overview.lastSyncTime}`;
     } catch (error) {
       this.errorMessage = '协同总览加载失败';
+    }
+  }
+
+  private async refreshContacts(): Promise<void> {
+    try {
+      const contacts = await this.viewModel.loadContacts();
+      this.contactCount = contacts.length;
+      this.syncHint = `联系人刷新 · ${this.formatTimeText()}`;
+    } catch (error) {
+      this.errorMessage = '联系人同步失败';
+    }
+  }
+
+  private async refreshMessages(): Promise<void> {
+    try {
+      const messages = await this.viewModel.loadMessages();
+      this.unreadMessages = messages.reduce((sum, item) => sum + (item.unread > 0 ? item.unread : 0), 0);
+      this.syncHint = `短信刷新 · ${this.formatTimeText()}`;
+    } catch (error) {
+      this.errorMessage = '短信同步失败';
+    }
+  }
+
+  private async refreshMusic(): Promise<void> {
+    try {
+      this.musicCount = (await this.viewModel.loadMusic()).length;
+      this.syncHint = `音乐刷新 · ${this.formatTimeText()}`;
+    } catch (error) {
+      this.errorMessage = '音乐同步失败';
+    }
+  }
+
+  private async refreshMusicState(): Promise<void> {
+    try {
+      const state = await this.viewModel.loadMusicState();
+      if (state) {
+        this.syncHint = `${state.title} · ${state.playing ? '播放中' : '已暂停'}`;
+      }
+    } catch (error) {
+      this.errorMessage = '音乐状态同步失败';
+    }
+  }
+
+  private async refreshContinuation(): Promise<void> {
+    try {
+      this.continuationCount = (await this.viewModel.loadContinuation()).length;
+      this.syncHint = `续接刷新 · ${this.formatTimeText()}`;
+    } catch (error) {
+      this.errorMessage = '续接任务同步失败';
     }
   }
 
@@ -142,6 +223,11 @@ export struct CollaborationModule {
     this.setLoadingState(true);
     this.viewModel.onSyncEvent(this.syncListener);
     void this.refreshOverview();
+    void this.refreshContacts();
+    void this.refreshMessages();
+    void this.refreshMusic();
+    void this.refreshMusicState();
+    void this.refreshContinuation();
     this.setLoadingState(false);
   }
 
@@ -168,6 +254,9 @@ export struct CollaborationModule {
             .fontSize(14)
             .fontWeight(FontWeight.Medium)
             .fontColor('#8B5CF6')
+          Text(`本机：${this.deviceRole === 'car' ? '车机端' : '手机端'}`)
+            .fontSize(10)
+            .fontColor('#A78BFA')
           Text(`最后同步 ${this.lastSyncTime}`)
             .fontSize(10)
             .fontColor('rgba(255,255,255,0.55)')
@@ -299,8 +388,7 @@ export struct CollaborationModule {
                 .borderRadius(12)
                 .padding({ left: 12, right: 12, top: 8, bottom: 8 })
                 .onClick(() => {
-                  this.pushLog('手动触发同步');
-                  void this.refreshOverview();
+                  void this.pushSharedLog('手动触发同步');
                 })
             }
             .width('100%')

@@ -96,8 +96,8 @@ export async function getFrequentLocations(req: Request, res: Response) {
       `SELECT * FROM frequent_locations 
        WHERE user_id = ? AND visit_count >= ? 
        ORDER BY visit_count DESC, last_visit DESC 
-       LIMIT ?`,
-      [userId, Number(minVisits), Number(limit)]
+       LIMIT ${Number(limit)}`,
+      [userId, Number(minVisits)]
     );
     
     res.json({
@@ -130,8 +130,7 @@ export async function getRecommendedLocations(req: Request, res: Response) {
       params.push(timePattern);
     }
     
-    sql += ' ORDER BY visit_count DESC, last_visit DESC LIMIT ?';
-    params.push(Number(limit));
+    sql += ` ORDER BY visit_count DESC, last_visit DESC LIMIT ${Number(limit)}`;
     
     const locations = await query<FrequentLocation[]>(sql, params);
     

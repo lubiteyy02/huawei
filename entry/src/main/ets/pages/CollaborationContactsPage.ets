@@ -13,16 +13,28 @@ interface ContactItem {
 @Component
 struct CollaborationContactsPage {
   @State private contacts: ContactItem[] = [];
-  @State private loading: boolean = false;
+  @State private initialLoading: boolean = false;
   @State private errorMessage: string = '';
+  @State private lastSyncHint: string = '等待同步事件';
   private readonly viewModel: CollaborationViewModel = CollaborationViewModel.getInstance();
   private readonly syncListener: (event: CollaborationSyncEvent) => void = (event: CollaborationSyncEvent): void => {
-    if (event.type === 'contact.updated' || event.type === 'overview.refreshed') {
-      void this.refreshContacts();
+    if (event.type === 'contact.updated') {
+      this.lastSyncHint = `${event.type} · ${event.timestamp}`;
+      const tag = typeof event.payload.tag === 'string' ? event.payload.tag : '';
+      const id = typeof event.payload.id === 'number' ? event.payload.id : -1;
+      if (id >= 0) {
+        this.contacts = this.contacts.map((item) => item.id === id ? { id: item.id, name: item.name, phone: item.phone, tag: tag !== '' ? tag : item.tag } : item);
+      }
+      return;
+    }
+    if (event.type === 'overview.refreshed') {
+      this.lastSyncHint = `${event.type} · ${event.timestamp}`;
+      return;
     }
   };
 
   aboutToAppear() {
+    this.initialLoading = true;
     void this.refreshContacts();
     this.viewModel.onSyncEvent(this.syncListener);
   }
@@ -32,14 +44,13 @@ struct CollaborationContactsPage {
   }
 
   private async refreshContacts(): Promise<void> {
-    this.loading = true;
     this.errorMessage = '';
     try {
       this.contacts = await this.viewModel.loadContacts() as ContactItem[];
     } catch (error) {
       this.errorMessage = '联系人加载失败，请稍后重试';
     } finally {
-      this.loading = false;
+      this.initialLoading = false;
     }
   }
 
@@ -52,18 +63,23 @@ struct CollaborationContactsPage {
           .fontColor('#FFFFFF')
           .borderRadius(12)
           .onClick(() => router.back())
-        Text('联系人同步')
-          .fontSize(22)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#FFFFFF')
-          .layoutWeight(1)
+        Column({ space: 4 }) {
+          Text('联系人同步')
+            .fontSize(22)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#FFFFFF')
+          Text(this.lastSyncHint)
+            .fontSize(10)
+            .fontColor('rgba(255,255,255,0.55)')
+        }
+        .layoutWeight(1)
       }
       .width('100%')
       .padding(18)
 
       Scroll() {
         Column({ space: 12 }) {
-          if (this.loading) {
+          if (this.initialLoading) {
             Text('正在加载联系人...')
               .fontSize(12)
               .fontColor('rgba(255,255,255,0.6)')
@@ -76,6 +92,9 @@ struct CollaborationContactsPage {
               .fontSize(12)
               .fontColor('rgba(255,255,255,0.6)')
           } else {
+            Text('已连接真实接口，正在实时同步联系人')
+              .fontSize(10)
+              .fontColor('#22C55E')
             ForEach(this.contacts, (item: ContactItem) => {
               Row() {
                 Column({ space: 4 }) {

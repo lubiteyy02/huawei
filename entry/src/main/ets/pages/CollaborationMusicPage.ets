@@ -1,7 +1,10 @@
 import router from '@ohos.router'
+import type common from '@ohos.app.ability.common'
 import { CollaborationViewModel } from '../services/CollaborationViewModel'
 import type { CollaborationSyncEvent } from '../services/CollaborationSyncSocketService'
 import { MusicStateSnapshot } from '../services/CollaborationApiService'
+import { RealMusicSessionService } from '../services/RealMusicSessionService'
+import { RealMusicBridgeService } from '../services/RealMusicBridgeService'
 
 interface MusicItem {
   id: number;
@@ -17,17 +20,39 @@ struct CollaborationMusicPage {
   @State private musicItems: MusicItem[] = [];
   @State private nowPlaying: MusicStateSnapshot | null = null;
   @State private resumeHint: string = '';
+  @State private lastSyncHint: string = '等待同步事件';
+  @State private initialLoading: boolean = false;
   private readonly viewModel: CollaborationViewModel = CollaborationViewModel.getInstance();
+  private readonly musicSessionService: RealMusicSessionService = RealMusicSessionService.getInstance();
+  private readonly musicBridge: RealMusicBridgeService = RealMusicBridgeService.getInstance();
   private readonly syncListener: (event: CollaborationSyncEvent) => void = (event: CollaborationSyncEvent): void => {
     if (event.type === 'music.stateChanged') {
-      void this.refreshNowPlaying();
-      void this.refreshMusic();
-    } else if (event.type === 'overview.refreshed') {
-      void this.refreshMusic();
+      this.lastSyncHint = `${event.type} · ${event.timestamp}`;
+      const songId = typeof event.payload.songId === 'number' ? event.payload.songId : -1;
+      const playing = event.payload.playing === 1 || event.payload.playing === true;
+      const position = typeof event.payload.position === 'number' ? event.payload.position : 0;
+      if (songId >= 0) {
+        this.nowPlaying = {
+          songId,
+          playing,
+          position,
+          updatedAt: event.timestamp,
+          title: this.nowPlaying && this.nowPlaying.songId === songId ? this.nowPlaying.title : this.nowPlaying ? this.nowPlaying.title : '',
+          artist: this.nowPlaying && this.nowPlaying.songId === songId ? this.nowPlaying.artist : this.nowPlaying ? this.nowPlaying.artist : '',
+          sourceDevice: this.nowPlaying ? this.nowPlaying.sourceDevice : ''
+        };
+      }
+      return;
+    }
+    if (event.type === 'overview.refreshed') {
+      this.lastSyncHint = `${event.type} · ${event.timestamp}`;
+      return;
     }
   };
 
   aboutToAppear() {
+    this.initialLoading = true;
+    void this.initializeRealMusicSession();
     void this.refreshMusic();
     void this.refreshNowPlaying();
     this.viewModel.onSyncEvent(this.syncListener);
@@ -35,15 +60,40 @@ struct CollaborationMusicPage {
 
   aboutToDisappear() {
     this.viewModel.offSyncEvent(this.syncListener);
+    void this.musicSessionService.destroy();
+  }
+
+  private async initializeRealMusicSession(): Promise<void> {
+    try {
+      this.musicBridge.enable()
+      this.musicSessionService.addListener((snapshot) => {
+        this.nowPlaying = {
+          songId: snapshot.songId,
+          playing: snapshot.playing,
+          position: snapshot.position,
+          updatedAt: new Date().toISOString(),
+          title: snapshot.title,
+          artist: snapshot.artist,
+          sourceDevice: snapshot.sourceDevice
+        }
+        this.musicBridge.updateFromSession(snapshot)
+      })
+      const uiAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext
+      await this.musicSessionService.initialize(uiAbilityContext)
+    } catch {
+      this.lastSyncHint = '真实音乐会话初始化失败'
+    }
   }
 
   private async refreshMusic(): Promise<void> {
     this.musicItems = await this.viewModel.loadMusic() as MusicItem[];
+    this.initialLoading = false;
   }
 
   private async refreshNowPlaying(): Promise<void> {
     const state = await this.viewModel.loadMusicState();
     this.nowPlaying = state;
+    this.initialLoading = false;
   }
 
   private formatPosition(ms: number): string {
@@ -70,18 +120,30 @@ struct CollaborationMusicPage {
           .fontColor('#FFFFFF')
           .borderRadius(12)
           .onClick(() => router.back())
-        Text('音乐同步')
-          .fontSize(22)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#FFFFFF')
-          .layoutWeight(1)
+        Column({ space: 4 }) {
+          Text('音乐同步')
+            .fontSize(22)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#FFFFFF')
+          Text(this.lastSyncHint)
+            .fontSize(10)
+            .fontColor('rgba(255,255,255,0.55)')
+        }
+        .layoutWeight(1)
       }
       .width('100%')
       .padding(18)
 
       Scroll() {
         Column({ space: 12 }) {
-          if (this.nowPlaying !== null && this.nowPlaying!.songId > 0) {
+          if (this.initialLoading) {
+            Text('正在加载音乐...')
+              .fontSize(12)
+              .fontColor('rgba(255,255,255,0.6)')
+          } else if (this.nowPlaying !== null && this.nowPlaying!.songId > 0) {
+            Text('已连接真实接口，手机与车机将实时同步播放状态')
+              .fontSize(10)
+              .fontColor('#22C55E')
             Column({ space: 8 }) {
               Row() {
                 Text('当前手机播放').fontSize(11).fontColor('rgba(255,255,255,0.55)')
@@ -99,6 +161,22 @@ struct CollaborationMusicPage {
                 .fontSize(12)
                 .fontColor('rgba(255,255,255,0.7)')
               Row() {
+                Button('播放测试')
+                  .fontSize(12)
+                  .backgroundColor('#2563EB')
+                  .fontColor('#FFFFFF')
+                  .borderRadius(14)
+                  .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+                  .onClick(() => {
+                    this.musicSessionService.simulatePhonePlaybackChange({
+                      songId: this.nowPlaying && this.nowPlaying.songId > 0 ? this.nowPlaying.songId : 1,
+                      title: this.nowPlaying && this.nowPlaying.title !== '' ? this.nowPlaying.title : '测试音乐',
+                      artist: this.nowPlaying && this.nowPlaying.artist !== '' ? this.nowPlaying.artist : '测试歌手',
+                      playing: !(this.nowPlaying ? this.nowPlaying.playing : false),
+                      position: this.nowPlaying ? this.nowPlaying.position + 1000 : 0,
+                      sourceDevice: 'phone'
+                    })
+                  })
                 Button('续接到车机')
                   .fontSize(12)
                   .backgroundColor('#8B5CF6')

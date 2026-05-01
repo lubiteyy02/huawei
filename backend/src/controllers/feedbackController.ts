@@ -94,8 +94,7 @@ export async function getFeedbackList(req: Request, res: Response) {
       params.push(feedbackType);
     }
     
-    sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-    params.push(Number(pageSize), offset);
+    sql += ` ORDER BY created_at DESC LIMIT ${Number(pageSize)} OFFSET ${Number(offset)}`;
     
     const feedbacks = await query<NavigationFeedback[]>(sql, params);
     

@@ -14,16 +14,27 @@ interface MessageThread {
 @Component
 struct CollaborationSmsPage {
   @State private threads: MessageThread[] = [];
-  @State private loading: boolean = false;
+  @State private initialLoading: boolean = false;
   @State private errorMessage: string = '';
+  @State private lastSyncHint: string = '等待同步事件';
   private readonly viewModel: CollaborationViewModel = CollaborationViewModel.getInstance();
   private readonly syncListener: (event: CollaborationSyncEvent) => void = (event: CollaborationSyncEvent): void => {
-    if (event.type === 'message.read' || event.type === 'overview.refreshed') {
-      void this.refreshMessages();
+    if (event.type === 'message.read') {
+      this.lastSyncHint = `${event.type} · ${event.timestamp}`;
+      const threadId = typeof event.payload.threadId === 'number' ? event.payload.threadId : -1;
+      if (threadId >= 0) {
+        this.threads = this.threads.map((item) => item.id === threadId ? { id: item.id, name: item.name, preview: item.preview, time: item.time, unread: 0 } : item);
+      }
+      return;
+    }
+    if (event.type === 'overview.refreshed') {
+      this.lastSyncHint = `${event.type} · ${event.timestamp}`;
+      return;
     }
   };
 
   aboutToAppear() {
+    this.initialLoading = true;
     void this.refreshMessages();
     this.viewModel.onSyncEvent(this.syncListener);
   }
@@ -33,14 +44,13 @@ struct CollaborationSmsPage {
   }
 
   private async refreshMessages(): Promise<void> {
-    this.loading = true;
     this.errorMessage = '';
     try {
       this.threads = await this.viewModel.loadMessages() as MessageThread[];
     } catch (error) {
       this.errorMessage = '短信加载失败，请稍后重试';
     } finally {
-      this.loading = false;
+      this.initialLoading = false;
     }
   }
 
@@ -53,18 +63,23 @@ struct CollaborationSmsPage {
           .fontColor('#FFFFFF')
           .borderRadius(12)
           .onClick(() => router.back())
-        Text('短信同步')
-          .fontSize(22)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#FFFFFF')
-          .layoutWeight(1)
+        Column({ space: 4 }) {
+          Text('短信同步')
+            .fontSize(22)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#FFFFFF')
+          Text(this.lastSyncHint)
+            .fontSize(10)
+            .fontColor('rgba(255,255,255,0.55)')
+        }
+        .layoutWeight(1)
       }
       .width('100%')
       .padding(18)
 
       Scroll() {
         Column({ space: 12 }) {
-          if (this.loading) {
+          if (this.initialLoading) {
             Text('正在加载短信...')
               .fontSize(12)
               .fontColor('rgba(255,255,255,0.6)')
@@ -77,6 +92,9 @@ struct CollaborationSmsPage {
               .fontSize(12)
               .fontColor('rgba(255,255,255,0.6)')
           } else {
+            Text('已连接真实接口，短信状态会实时刷新')
+              .fontSize(10)
+              .fontColor('#22C55E')
             ForEach(this.threads, (thread: MessageThread) => {
               Column({ space: 6 }) {
                 Row() {

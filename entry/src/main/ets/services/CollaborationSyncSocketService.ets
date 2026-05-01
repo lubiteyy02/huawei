@@ -23,6 +23,8 @@ interface CollaborationSocketClient {
 interface SyncEnvelope {
   type?: string;
   event?: CollaborationSyncEvent;
+  targetUserId?: string;
+  targetDeviceId?: string;
 }
 
 export class CollaborationSyncSocketService {

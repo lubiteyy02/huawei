@@ -14,16 +14,27 @@ interface ContinuationTask {
 @Component
 struct CollaborationResumePage {
   @State private tasks: ContinuationTask[] = [];
-  @State private loading: boolean = false;
+  @State private initialLoading: boolean = false;
   @State private errorMessage: string = '';
+  @State private lastSyncHint: string = '等待同步事件';
   private readonly viewModel: CollaborationViewModel = CollaborationViewModel.getInstance();
   private readonly syncListener: (event: CollaborationSyncEvent) => void = (event: CollaborationSyncEvent): void => {
-    if (event.type === 'continuation.resumed' || event.type === 'overview.refreshed') {
-      void this.refreshContinuation();
+    if (event.type === 'continuation.resumed') {
+      this.lastSyncHint = `${event.type} · ${event.timestamp}`;
+      const continuationId = typeof event.payload.continuationId === 'number' ? event.payload.continuationId : -1;
+      if (continuationId >= 0) {
+        this.tasks = this.tasks.filter((item) => item.id !== continuationId);
+      }
+      return;
+    }
+    if (event.type === 'overview.refreshed') {
+      this.lastSyncHint = `${event.type} · ${event.timestamp}`;
+      return;
     }
   };
 
   aboutToAppear() {
+    this.initialLoading = true;
     void this.refreshContinuation();
     this.viewModel.onSyncEvent(this.syncListener);
   }
@@ -33,14 +44,13 @@ struct CollaborationResumePage {
   }
 
   private async refreshContinuation(): Promise<void> {
-    this.loading = true;
     this.errorMessage = '';
     try {
       this.tasks = await this.viewModel.loadContinuation() as ContinuationTask[];
     } catch (error) {
       this.errorMessage = '续接任务加载失败，请稍后重试';
     } finally {
-      this.loading = false;
+      this.initialLoading = false;
     }
   }
 
@@ -53,18 +63,23 @@ struct CollaborationResumePage {
           .fontColor('#FFFFFF')
           .borderRadius(12)
           .onClick(() => router.back())
-        Text('应用续接')
-          .fontSize(22)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#FFFFFF')
-          .layoutWeight(1)
+        Column({ space: 4 }) {
+          Text('应用续接')
+            .fontSize(22)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#FFFFFF')
+          Text(this.lastSyncHint)
+            .fontSize(10)
+            .fontColor('rgba(255,255,255,0.55)')
+        }
+        .layoutWeight(1)
       }
       .width('100%')
       .padding(18)
 
       Scroll() {
         Column({ space: 12 }) {
-          if (this.loading) {
+          if (this.initialLoading) {
             Text('正在加载续接任务...')
               .fontSize(12)
               .fontColor('rgba(255,255,255,0.6)')
@@ -77,6 +92,9 @@ struct CollaborationResumePage {
               .fontSize(12)
               .fontColor('rgba(255,255,255,0.6)')
           } else {
+            Text('已连接真实接口，续接状态会实时刷新')
+              .fontSize(10)
+              .fontColor('#22C55E')
             ForEach(this.tasks, (task: ContinuationTask) => {
               Row({ space: 12 }) {
                 Column({ space: 4 }) {
