@@ -1,4 +1,6 @@
 import router from '@ohos.router'
+import { CollaborationViewModel } from '../services/CollaborationViewModel'
+import type { CollaborationSyncEvent } from '../services/CollaborationSyncSocketService'
 
 interface ContinuationTask {
   id: number;
@@ -11,10 +13,36 @@ interface ContinuationTask {
 @Entry
 @Component
 struct CollaborationResumePage {
-  private readonly tasks: ContinuationTask[] = [
-    { id: 1, module: '导航', title: '去公司', detail: '已在手机上规划路线', device: '手机' },
-    { id: 2, module: '音乐', title: '七里香', detail: '播放进度 01:08', device: '手机' }
-  ];
+  @State private tasks: ContinuationTask[] = [];
+  @State private loading: boolean = false;
+  @State private errorMessage: string = '';
+  private readonly viewModel: CollaborationViewModel = CollaborationViewModel.getInstance();
+  private readonly syncListener: (event: CollaborationSyncEvent) => void = (event: CollaborationSyncEvent): void => {
+    if (event.type === 'continuation.resumed' || event.type === 'overview.refreshed') {
+      void this.refreshContinuation();
+    }
+  };
+
+  aboutToAppear() {
+    void this.refreshContinuation();
+    this.viewModel.onSyncEvent(this.syncListener);
+  }
+
+  aboutToDisappear() {
+    this.viewModel.offSyncEvent(this.syncListener);
+  }
+
+  private async refreshContinuation(): Promise<void> {
+    this.loading = true;
+    this.errorMessage = '';
+    try {
+      this.tasks = await this.viewModel.loadContinuation() as ContinuationTask[];
+    } catch (error) {
+      this.errorMessage = '续接任务加载失败，请稍后重试';
+    } finally {
+      this.loading = false;
+    }
+  }
 
   build() {
     Column() {
@@ -36,34 +64,54 @@ struct CollaborationResumePage {
 
       Scroll() {
         Column({ space: 12 }) {
-          ForEach(this.tasks, (task: ContinuationTask) => {
-            Row({ space: 12 }) {
-              Column({ space: 4 }) {
-                Text(task.module)
-                  .fontSize(12)
-                  .fontColor('rgba(255,255,255,0.55)')
-                Text(task.title)
-                  .fontSize(16)
-                  .fontWeight(FontWeight.Bold)
-                  .fontColor('#FFFFFF')
-                Text(task.detail)
-                  .fontSize(11)
-                  .fontColor('rgba(255,255,255,0.60)')
-              }
-              .layoutWeight(1)
+          if (this.loading) {
+            Text('正在加载续接任务...')
+              .fontSize(12)
+              .fontColor('rgba(255,255,255,0.6)')
+          } else if (this.errorMessage !== '') {
+            Text(this.errorMessage)
+              .fontSize(12)
+              .fontColor('#F87171')
+          } else if (this.tasks.length === 0) {
+            Text('暂无可续接任务')
+              .fontSize(12)
+              .fontColor('rgba(255,255,255,0.6)')
+          } else {
+            ForEach(this.tasks, (task: ContinuationTask) => {
+              Row({ space: 12 }) {
+                Column({ space: 4 }) {
+                  Text(task.module)
+                    .fontSize(12)
+                    .fontColor('rgba(255,255,255,0.55)')
+                  Text(task.title)
+                    .fontSize(16)
+                    .fontWeight(FontWeight.Bold)
+                    .fontColor('#FFFFFF')
+                  Text(task.detail)
+                    .fontSize(11)
+                    .fontColor('rgba(255,255,255,0.60)')
+                }
+                .layoutWeight(1)
 
-              Button('续接')
-                .fontSize(12)
-                .backgroundColor('#F59E0B')
-                .fontColor('#FFFFFF')
-                .borderRadius(14)
-                .padding({ left: 14, right: 14, top: 8, bottom: 8 })
-            }
-            .width('100%')
-            .padding(14)
-            .backgroundColor('rgba(255,255,255,0.06)')
-            .borderRadius(18)
-          })
+                Button('续接')
+                  .fontSize(12)
+                  .backgroundColor('#F59E0B')
+                  .fontColor('#FFFFFF')
+                  .borderRadius(14)
+                  .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+                  .onClick(async () => {
+                    const updated = await this.viewModel.resumeContinuation(task.id);
+                    if (updated) {
+                      await this.refreshContinuation();
+                    }
+                  })
+              }
+              .width('100%')
+              .padding(14)
+              .backgroundColor('rgba(255,255,255,0.06)')
+              .borderRadius(18)
+            })
+          }
         }
         .width('100%')
         .padding({ left: 18, right: 18, bottom: 18 })

@@ -1,4 +1,6 @@
 import router from '@ohos.router'
+import { CollaborationViewModel } from '../services/CollaborationViewModel'
+import type { CollaborationSyncEvent } from '../services/CollaborationSyncSocketService'
 
 interface ContactItem {
   id: number;
@@ -10,12 +12,36 @@ interface ContactItem {
 @Entry
 @Component
 struct CollaborationContactsPage {
-  private readonly contacts: ContactItem[] = [
-    { id: 1, name: '李明', phone: '138-0000-0001', tag: '常用' },
-    { id: 2, name: '王婷', phone: '138-0000-0002', tag: '最近' },
-    { id: 3, name: '张伟', phone: '138-0000-0003', tag: '收藏' },
-    { id: 4, name: '陈晨', phone: '138-0000-0004', tag: '工作' }
-  ];
+  @State private contacts: ContactItem[] = [];
+  @State private loading: boolean = false;
+  @State private errorMessage: string = '';
+  private readonly viewModel: CollaborationViewModel = CollaborationViewModel.getInstance();
+  private readonly syncListener: (event: CollaborationSyncEvent) => void = (event: CollaborationSyncEvent): void => {
+    if (event.type === 'contact.updated' || event.type === 'overview.refreshed') {
+      void this.refreshContacts();
+    }
+  };
+
+  aboutToAppear() {
+    void this.refreshContacts();
+    this.viewModel.onSyncEvent(this.syncListener);
+  }
+
+  aboutToDisappear() {
+    this.viewModel.offSyncEvent(this.syncListener);
+  }
+
+  private async refreshContacts(): Promise<void> {
+    this.loading = true;
+    this.errorMessage = '';
+    try {
+      this.contacts = await this.viewModel.loadContacts() as ContactItem[];
+    } catch (error) {
+      this.errorMessage = '联系人加载失败，请稍后重试';
+    } finally {
+      this.loading = false;
+    }
+  }
 
   build() {
     Column() {
@@ -37,25 +63,45 @@ struct CollaborationContactsPage {
 
       Scroll() {
         Column({ space: 12 }) {
-          ForEach(this.contacts, (item: ContactItem) => {
-            Row() {
-              Column({ space: 4 }) {
-                Text(item.name).fontSize(16).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
-                Text(item.phone).fontSize(11).fontColor('rgba(255,255,255,0.6)')
+          if (this.loading) {
+            Text('正在加载联系人...')
+              .fontSize(12)
+              .fontColor('rgba(255,255,255,0.6)')
+          } else if (this.errorMessage !== '') {
+            Text(this.errorMessage)
+              .fontSize(12)
+              .fontColor('#F87171')
+          } else if (this.contacts.length === 0) {
+            Text('暂无联系人数据')
+              .fontSize(12)
+              .fontColor('rgba(255,255,255,0.6)')
+          } else {
+            ForEach(this.contacts, (item: ContactItem) => {
+              Row() {
+                Column({ space: 4 }) {
+                  Text(item.name).fontSize(16).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
+                  Text(item.phone).fontSize(11).fontColor('rgba(255,255,255,0.6)')
+                }
+                .layoutWeight(1)
+                Button(item.tag)
+                  .fontSize(10)
+                  .fontColor('#A78BFA')
+                  .backgroundColor('rgba(168,85,247,0.12)')
+                  .borderRadius(999)
+                  .onClick(async () => {
+                    const nextTag = item.tag === '收藏' ? '常用' : '收藏';
+                    const updated = await this.viewModel.updateContactTag(item.id, nextTag);
+                    if (updated) {
+                      await this.refreshContacts();
+                    }
+                  })
               }
-              .layoutWeight(1)
-              Text(item.tag)
-                .fontSize(10)
-                .fontColor('#A78BFA')
-                .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-                .backgroundColor('rgba(168,85,247,0.12)')
-                .borderRadius(999)
-            }
-            .width('100%')
-            .padding(14)
-            .backgroundColor('rgba(255,255,255,0.06)')
-            .borderRadius(18)
-          })
+              .width('100%')
+              .padding(14)
+              .backgroundColor('rgba(255,255,255,0.06)')
+              .borderRadius(18)
+            })
+          }
         }
         .width('100%')
         .padding({ left: 18, right: 18, bottom: 18 })

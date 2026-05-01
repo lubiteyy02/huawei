@@ -1,5 +1,6 @@
 import { CacheService } from './CacheService'
 import { CollaborationApiService } from './CollaborationApiService'
+import type { CollaborationBackendConfig, MusicStateSnapshot } from './CollaborationApiService'
 
 export interface CollaborationContact {
   id: number;
@@ -32,10 +33,12 @@ export interface CollaborationContinuationTask {
   device: string;
 }
 
-export interface CollaborationBackendConfig {
-  baseUrl?: string;
-  deviceId?: string;
-  userId?: string;
+export class BackendFetcher<T> {
+  readonly fetch: () => Promise<T | null>;
+
+  constructor(fetch: () => Promise<T | null>) {
+    this.fetch = fetch;
+  }
 }
 
 export interface CollaborationOverview {
@@ -104,6 +107,18 @@ export class CollaborationDataService {
     this.apiService.configure(config)
   }
 
+  updateContactTag(id: number, tag: string): Promise<boolean> {
+    return this.apiService.updateContactTag(id, tag)
+  }
+
+  markMessageRead(threadId: number): Promise<boolean> {
+    return this.apiService.markMessageRead(threadId)
+  }
+
+  resumeContinuation(continuationId: number): Promise<boolean> {
+    return this.apiService.resumeContinuation(continuationId)
+  }
+
   static getInstance(): CollaborationDataService {
     if (!CollaborationDataService.instance) {
       CollaborationDataService.instance = new CollaborationDataService()
@@ -120,21 +135,21 @@ export class CollaborationDataService {
     }
   }
 
-  private async getFromBackendOrCache<T>(backendFetcher: () => Promise<T | null>, cacheKey: string, fallback: T): Promise<T> {
+  private async getFromBackendOrCache<T>(backendFetcher: BackendFetcher<T>, cacheKey: string, fallback: T): Promise<T> {
     if (this.useBackend) {
-      const backendData = await backendFetcher()
-      if (backendData) {
+      const backendData = await backendFetcher.fetch()
+      if (backendData !== null) {
         await this.cacheService.set(cacheKey, backendData, 1000 * 60 * 30)
         return backendData
       }
-      return fallback
+      return this.readCached<T>(cacheKey, fallback)
     }
     return this.readCached<T>(cacheKey, fallback)
   }
 
   async getOverview(): Promise<CollaborationOverview> {
     return this.getFromBackendOrCache<CollaborationOverview>(
-      () => this.apiService.getOverview(),
+      new BackendFetcher<CollaborationOverview>(() => this.apiService.getOverview()),
       'collaboration_overview',
       defaultOverview
     )
@@ -142,7 +157,7 @@ export class CollaborationDataService {
 
   async getContacts(): Promise<CollaborationContact[]> {
     return this.getFromBackendOrCache<CollaborationContact[]>(
-      () => this.apiService.getContacts(),
+      new BackendFetcher<CollaborationContact[]>(() => this.apiService.getContacts()),
       'collaboration_contacts',
       defaultContacts
     )
@@ -150,7 +165,7 @@ export class CollaborationDataService {
 
   async getMessageThreads(): Promise<CollaborationMessageThread[]> {
     return this.getFromBackendOrCache<CollaborationMessageThread[]>(
-      () => this.apiService.getMessageThreads(),
+      new BackendFetcher<CollaborationMessageThread[]>(() => this.apiService.getMessageThreads()),
       'collaboration_message_threads',
       defaultThreads
     )
@@ -158,7 +173,7 @@ export class CollaborationDataService {
 
   async getMusicItems(): Promise<CollaborationMusicItem[]> {
     return this.getFromBackendOrCache<CollaborationMusicItem[]>(
-      () => this.apiService.getMusicItems(),
+      new BackendFetcher<CollaborationMusicItem[]>(() => this.apiService.getMusicItems()),
       'collaboration_music_items',
       defaultMusic
     )
@@ -166,7 +181,7 @@ export class CollaborationDataService {
 
   async getContinuationTasks(): Promise<CollaborationContinuationTask[]> {
     return this.getFromBackendOrCache<CollaborationContinuationTask[]>(
-      () => this.apiService.getContinuationTasks(),
+      new BackendFetcher<CollaborationContinuationTask[]>(() => this.apiService.getContinuationTasks()),
       'collaboration_continuation_tasks',
       defaultContinuation
     )
@@ -174,5 +189,30 @@ export class CollaborationDataService {
 
   async syncNow(message: string): Promise<string[]> {
     return [`${message} · ${new Date().toLocaleTimeString()}`]
+  }
+
+  async syncMusicState(songId: number, playing: boolean, position: number): Promise<boolean> {
+    if (this.useBackend) {
+      return this.apiService.syncMusicState(songId, playing, position)
+    }
+    return true
+  }
+
+  async getMusicState(): Promise<MusicStateSnapshot | null> {
+    if (this.useBackend) {
+      return this.apiService.getMusicState()
+    }
+    return null
+  }
+
+  async addLog(message: string, sourceLabel: string): Promise<string[] | null> {
+    if (this.useBackend) {
+      return this.apiService.addLog(message, sourceLabel)
+    }
+    return null
+  }
+
+  getDeviceId(): string {
+    return this.apiService.getDeviceId()
   }
 }
