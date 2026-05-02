@@ -43,6 +43,10 @@ export struct EnhancedNavigationModule {
   @State showSearchHistory: boolean = false;
   @State searchHistory: string[] = [];
   
+  // 待启动导航：地图未加载完时暂存目的地，加载完后立即启动（替代 100ms 轮询）
+  private pendingDestination: Location | null = null;
+  private pendingDestinationName: string = '';
+
   // 服务实例
   private mapService: MapService = MapService.getInstance();
   private navigationService: NavigationService = NavigationService.getInstance();
@@ -79,46 +83,26 @@ export struct EnhancedNavigationModule {
   
   /**
    * 处理外部传入的导航目的地
+   * 地图已加载：立即启动；未加载：暂存到 pendingDestination，由 onMapLoad 触发（事件式，无轮询）
    */
   handleExternalDestination() {
     if (!this.externalDestination) {
       return;
     }
-    
     console.log('[Navigation] 收到外部导航目的地:', this.externalDestination.name);
-    console.log('[Navigation] 坐标:', this.externalDestination.latitude, this.externalDestination.longitude);
-    
+
     const destination: Location = {
       latitude: this.externalDestination.latitude,
       longitude: this.externalDestination.longitude
     };
-    
-    // 如果地图已加载,立即启动导航;否则等待地图加载
+    const destName: string = this.externalDestination.name || this.externalDestination.address || '外部目的地';
+
     if (this.isMapLoaded) {
-      console.log('[Navigation] 地图已加载,立即启动导航');
-      // 延迟一下,确保WebView完全准备好
-      setTimeout(() => {
-        this.startNavigation(destination, this.externalDestination?.name || this.externalDestination?.address || '外部目的地');
-      }, 500);
+      this.startNavigation(destination, destName);
     } else {
-      console.log('[Navigation] 等待地图加载...');
-      // 等待地图加载完成后再启动导航
-      let retryCount = 0;
-      const maxRetries = 100; // 10秒超时
-      const checkInterval = setInterval(() => {
-        retryCount++;
-        if (this.isMapLoaded) {
-          console.log('[Navigation] 地图加载完成(重试', retryCount, '次),启动导航');
-          clearInterval(checkInterval);
-          // 延迟一下,确保WebView完全准备好
-          setTimeout(() => {
-            this.startNavigation(destination, this.externalDestination?.name || this.externalDestination?.address || '外部目的地');
-          }, 500);
-        } else if (retryCount >= maxRetries) {
-          console.error('[Navigation] 等待地图加载超时');
-          clearInterval(checkInterval);
-        }
-      }, 100);
+      console.log('[Navigation] 地图未加载，暂存目的地，等待 onMapLoad 触发');
+      this.pendingDestination = destination;
+      this.pendingDestinationName = destName;
     }
   }
   
@@ -154,24 +138,28 @@ export struct EnhancedNavigationModule {
   onMapLoad() {
     this.isMapLoaded = true;
     this.mapService.setWebController(this.webController);
-    
-    // 移动地图到默认位置
+
     const defaultLocation: Location = {
       latitude: this.latitude,
       longitude: this.longitude
     };
     this.mapService.moveToLocation(defaultLocation, this.zoomLevel);
-    
-    // 延迟添加标记，确保WebView准备好
+
+    // 单次短延迟：等 WebView 初始化完成（150ms 通常足够，比之前 300+500ms 更快）
     setTimeout(() => {
       this.mapService.addCurrentLocationMarker(defaultLocation);
+      this.addressText = "默认位置(武汉)";
       console.log('[Navigation] 地图初始化完成');
-    }, 300);
-    
-    // 启动默认定位
-    setTimeout(() => {
-      this.startDefaultLocation();
-    }, 500);
+
+      // 若有手机端/收藏页推送的待启动目的地，立即开始导航
+      if (this.pendingDestination) {
+        const dest: Location = this.pendingDestination;
+        const name: string = this.pendingDestinationName;
+        this.pendingDestination = null;
+        this.pendingDestinationName = '';
+        this.startNavigation(dest, name);
+      }
+    }, 150);
   }
   
   /**

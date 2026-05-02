@@ -1,6 +1,7 @@
 import { CacheService } from './CacheService'
 import { CollaborationApiService } from './CollaborationApiService'
 import type { CollaborationBackendConfig, MusicStateSnapshot } from './CollaborationApiService'
+import type { ContactBulkItem } from './RealContactsService'
 
 export interface CollaborationContact {
   id: number;
@@ -194,6 +195,34 @@ export class CollaborationDataService {
   async syncMusicState(songId: number, playing: boolean, position: number): Promise<boolean> {
     if (this.useBackend) {
       return this.apiService.syncMusicState(songId, playing, position)
+    }
+    return true
+  }
+
+  async handoverMusic(songId: number, position: number, target: string): Promise<boolean> {
+    if (this.useBackend) {
+      return this.apiService.handoverMusic(songId, position, target)
+    }
+    return true
+  }
+
+  async bulkUploadContacts(items: ContactBulkItem[]): Promise<boolean> {
+    if (this.useBackend) {
+      return this.apiService.bulkUploadContacts(items)
+    }
+    return true
+  }
+
+  async createMessage(name: string, preview: string): Promise<boolean> {
+    if (this.useBackend) {
+      return this.apiService.createMessage(name, preview)
+    }
+    return true
+  }
+
+  async navigationHandover(name: string, address: string, latitude: number, longitude: number): Promise<boolean> {
+    if (this.useBackend) {
+      return this.apiService.navigationHandover(name, address, latitude, longitude)
     }
     return true
   }

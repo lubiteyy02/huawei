@@ -1,6 +1,6 @@
 import { WebSocketServer, WebSocket } from 'ws';
 
-export type CollaborationSyncEventType = 'contact.updated' | 'message.read' | 'music.stateChanged' | 'continuation.resumed' | 'overview.refreshed';
+export type CollaborationSyncEventType = 'contact.updated' | 'message.read' | 'message.created' | 'music.stateChanged' | 'music.handover' | 'continuation.resumed' | 'navigation.handover' | 'overview.refreshed';
 
 export interface CollaborationSyncEvent {
   type: CollaborationSyncEventType;

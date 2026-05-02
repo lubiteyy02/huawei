@@ -5,6 +5,7 @@ import type { CollaborationSyncEvent } from '../services/CollaborationSyncSocket
 import { MusicStateSnapshot } from '../services/CollaborationApiService'
 import { RealMusicSessionService } from '../services/RealMusicSessionService'
 import { RealMusicBridgeService } from '../services/RealMusicBridgeService'
+import { RealAudioPlayerService, AudioPlayerSnapshot } from '../services/RealAudioPlayerService'
 
 interface MusicItem {
   id: number;
@@ -22,25 +23,65 @@ struct CollaborationMusicPage {
   @State private resumeHint: string = '';
   @State private lastSyncHint: string = '等待同步事件';
   @State private initialLoading: boolean = false;
+  @State private isCar: boolean = false;
+  @State private currentSongId: number = 0;
   private readonly viewModel: CollaborationViewModel = CollaborationViewModel.getInstance();
   private readonly musicSessionService: RealMusicSessionService = RealMusicSessionService.getInstance();
   private readonly musicBridge: RealMusicBridgeService = RealMusicBridgeService.getInstance();
+  private readonly audioPlayer: RealAudioPlayerService = RealAudioPlayerService.getInstance();
+  private lastReportedMs: number = -1;
+  private lastReportedTime: number = 0;
+  private lastReportedPlaying: boolean = false;
+  private lastReportedSongId: number = 0;
+  private remoteEventTimestamp: number = 0;
+  private tickerId: number = -1;
+  private readonly audioListener: (snap: AudioPlayerSnapshot) => void = (snap: AudioPlayerSnapshot): void => {
+    this.currentSongId = snap.songId;
+    this.nowPlaying = {
+      songId: snap.songId,
+      playing: snap.playing,
+      position: snap.position,
+      updatedAt: new Date().toISOString(),
+      title: snap.title,
+      artist: snap.artist,
+      sourceDevice: this.viewModel.getDeviceId()
+    };
+    this.reportToBackend(snap);
+  };
   private readonly syncListener: (event: CollaborationSyncEvent) => void = (event: CollaborationSyncEvent): void => {
     if (event.type === 'music.stateChanged') {
       this.lastSyncHint = `${event.type} · ${event.timestamp}`;
       const songId = typeof event.payload.songId === 'number' ? event.payload.songId : -1;
       const playing = event.payload.playing === 1 || event.payload.playing === true;
       const position = typeof event.payload.position === 'number' ? event.payload.position : 0;
-      if (songId >= 0) {
+      const fromSelf = event.sourceDeviceId === this.viewModel.getDeviceId();
+      if (songId >= 0 && !fromSelf) {
+        this.remoteEventTimestamp = Date.now();
         this.nowPlaying = {
           songId,
           playing,
           position,
           updatedAt: event.timestamp,
-          title: this.nowPlaying && this.nowPlaying.songId === songId ? this.nowPlaying.title : this.nowPlaying ? this.nowPlaying.title : '',
-          artist: this.nowPlaying && this.nowPlaying.songId === songId ? this.nowPlaying.artist : this.nowPlaying ? this.nowPlaying.artist : '',
-          sourceDevice: this.nowPlaying ? this.nowPlaying.sourceDevice : ''
+          title: this.nowPlaying && this.nowPlaying.songId === songId ? this.nowPlaying.title : '',
+          artist: this.nowPlaying && this.nowPlaying.songId === songId ? this.nowPlaying.artist : '',
+          sourceDevice: event.sourceDeviceId ?? ''
         };
+      }
+      return;
+    }
+    if (event.type === 'music.handover') {
+      this.lastSyncHint = `续接事件 · ${event.timestamp}`;
+      const songId = typeof event.payload.songId === 'number' ? event.payload.songId : -1;
+      const position = typeof event.payload.position === 'number' ? event.payload.position : 0;
+      const target = typeof event.payload.target === 'string' ? event.payload.target : '';
+      const myId = this.viewModel.getDeviceId();
+      if (songId < 0) return;
+      if (target === myId) {
+        void this.audioPlayer.playById(songId, position, true);
+        this.resumeHint = `已接收续接，开始播放`;
+      } else {
+        void this.audioPlayer.pause();
+        this.resumeHint = `已让出播放权给 ${target}`;
       }
       return;
     }
@@ -52,32 +93,79 @@ struct CollaborationMusicPage {
 
   aboutToAppear() {
     this.initialLoading = true;
+    const deviceId = this.viewModel.getDeviceId();
+    this.isCar = deviceId === 'car-001';
+    const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    this.audioPlayer.setContext(ctx);
+    this.audioPlayer.addListener(this.audioListener);
     void this.initializeRealMusicSession();
     void this.refreshMusic();
     void this.refreshNowPlaying();
     this.viewModel.onSyncEvent(this.syncListener);
+    this.tickerId = setInterval((): void => { this.tickRemotePosition(); }, 250);
   }
 
   aboutToDisappear() {
     this.viewModel.offSyncEvent(this.syncListener);
+    this.audioPlayer.removeListener(this.audioListener);
+    void this.audioPlayer.release();
+    if (this.tickerId !== -1) {
+      clearInterval(this.tickerId);
+      this.tickerId = -1;
+    }
     void this.musicSessionService.destroy();
+  }
+
+  private tickRemotePosition(): void {
+    if (!this.nowPlaying) return;
+    if (!this.nowPlaying.playing) return;
+    const mine = this.nowPlaying.sourceDevice === this.viewModel.getDeviceId();
+    if (mine) return;
+    if (this.remoteEventTimestamp === 0) return;
+    const elapsed = Date.now() - this.remoteEventTimestamp;
+    this.nowPlaying = {
+      songId: this.nowPlaying.songId,
+      playing: this.nowPlaying.playing,
+      position: this.nowPlaying.position + elapsed,
+      updatedAt: this.nowPlaying.updatedAt,
+      title: this.nowPlaying.title,
+      artist: this.nowPlaying.artist,
+      sourceDevice: this.nowPlaying.sourceDevice
+    };
+    this.remoteEventTimestamp = Date.now();
+  }
+
+  private reportToBackend(snap: AudioPlayerSnapshot): void {
+    if (this.isCar) return;
+    if (snap.songId <= 0) return;
+    const now = Date.now();
+    const timeDiff = now - this.lastReportedTime;
+    const stateChanged = snap.playing !== this.lastReportedPlaying
+      || snap.songId !== this.lastReportedSongId;
+    if (!stateChanged && timeDiff < 3000) return;
+    this.lastReportedMs = snap.position;
+    this.lastReportedTime = now;
+    this.lastReportedPlaying = snap.playing;
+    this.lastReportedSongId = snap.songId;
+    void this.viewModel.syncMusic(snap.songId, snap.playing, snap.position);
+  }
+
+  private async onPhonePlay(songId: number): Promise<void> {
+    await this.audioPlayer.playById(songId, 0, true);
+    void this.viewModel.pushSharedLog(`手机开始播放：${songId}`, this.viewModel.getDeviceId());
+  }
+
+  private async onPhonePause(): Promise<void> {
+    await this.audioPlayer.pause();
+  }
+
+  private async onPhoneResume(): Promise<void> {
+    await this.audioPlayer.resume();
   }
 
   private async initializeRealMusicSession(): Promise<void> {
     try {
-      this.musicBridge.enable()
-      this.musicSessionService.addListener((snapshot) => {
-        this.nowPlaying = {
-          songId: snapshot.songId,
-          playing: snapshot.playing,
-          position: snapshot.position,
-          updatedAt: new Date().toISOString(),
-          title: snapshot.title,
-          artist: snapshot.artist,
-          sourceDevice: snapshot.sourceDevice
-        }
-        this.musicBridge.updateFromSession(snapshot)
-      })
+      this.musicBridge.disable()
       const uiAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext
       await this.musicSessionService.initialize(uiAbilityContext)
     } catch {
@@ -103,12 +191,29 @@ struct CollaborationMusicPage {
     return `${m}:${s}`;
   }
 
-  private async resumeOnCar(): Promise<void> {
-    if (!this.nowPlaying) {
+  private computeHandoverTarget(): string {
+    const source = this.nowPlaying ? this.nowPlaying.sourceDevice : '';
+    const myId = this.viewModel.getDeviceId();
+    if (source === 'phone-001') return 'car-001';
+    if (source === 'car-001') return 'phone-001';
+    return myId === 'phone-001' ? 'car-001' : 'phone-001';
+  }
+
+  private handoverTargetLabel(): string {
+    return this.computeHandoverTarget() === 'car-001' ? '续接到车机' : '拉回手机播放';
+  }
+
+  private async triggerHandover(): Promise<void> {
+    if (!this.nowPlaying || this.nowPlaying.songId <= 0) {
+      this.resumeHint = '暂无正在播放的曲目';
       return;
     }
-    const ok = await this.viewModel.syncMusic(this.nowPlaying.songId, true, this.nowPlaying.position);
-    this.resumeHint = ok ? `已在车机续接：${this.nowPlaying.title} @ ${this.formatPosition(this.nowPlaying.position)}` : '续接失败，请稍后重试';
+    const songId = this.nowPlaying.songId;
+    const position = this.nowPlaying.position;
+    const target = this.computeHandoverTarget();
+    const ok = await this.viewModel.handoverMusic(songId, position, target);
+    const label = target === 'car-001' ? '车机' : '手机';
+    this.resumeHint = ok ? `已通知${label}接手播放 @ ${this.formatPosition(position)}` : '续接失败，请稍后重试';
   }
 
   build() {
@@ -161,29 +266,28 @@ struct CollaborationMusicPage {
                 .fontSize(12)
                 .fontColor('rgba(255,255,255,0.7)')
               Row() {
-                Button('播放测试')
-                  .fontSize(12)
-                  .backgroundColor('#2563EB')
-                  .fontColor('#FFFFFF')
-                  .borderRadius(14)
-                  .padding({ left: 14, right: 14, top: 8, bottom: 8 })
-                  .onClick(() => {
-                    this.musicSessionService.simulatePhonePlaybackChange({
-                      songId: this.nowPlaying && this.nowPlaying.songId > 0 ? this.nowPlaying.songId : 1,
-                      title: this.nowPlaying && this.nowPlaying.title !== '' ? this.nowPlaying.title : '测试音乐',
-                      artist: this.nowPlaying && this.nowPlaying.artist !== '' ? this.nowPlaying.artist : '测试歌手',
-                      playing: !(this.nowPlaying ? this.nowPlaying.playing : false),
-                      position: this.nowPlaying ? this.nowPlaying.position + 1000 : 0,
-                      sourceDevice: 'phone'
+                if (!this.isCar) {
+                  Button(this.nowPlaying && this.nowPlaying.playing ? '暂停' : '播放')
+                    .fontSize(12)
+                    .backgroundColor('#2563EB')
+                    .fontColor('#FFFFFF')
+                    .borderRadius(14)
+                    .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+                    .onClick(() => {
+                      if (this.nowPlaying && this.nowPlaying.playing) {
+                        void this.onPhonePause();
+                      } else {
+                        void this.onPhoneResume();
+                      }
                     })
-                  })
-                Button('续接到车机')
+                }
+                Button(this.handoverTargetLabel())
                   .fontSize(12)
                   .backgroundColor('#8B5CF6')
                   .fontColor('#FFFFFF')
                   .borderRadius(14)
                   .padding({ left: 14, right: 14, top: 8, bottom: 8 })
-                  .onClick(() => { void this.resumeOnCar(); })
+                  .onClick(() => { void this.triggerHandover(); })
                 Blank()
                 if (this.resumeHint !== '') {
                   Text(this.resumeHint).fontSize(10).fontColor('#A78BFA').maxLines(2)
@@ -205,7 +309,17 @@ struct CollaborationMusicPage {
                   Text(music.artist).fontSize(11).fontColor('rgba(255,255,255,0.6)')
                 }
                 .layoutWeight(1)
-                Text(music.device).fontSize(10).fontColor('#A78BFA')
+                if (!this.isCar) {
+                  Button(this.currentSongId === music.id && this.nowPlaying && this.nowPlaying.playing ? '播放中' : '播放')
+                    .fontSize(11)
+                    .backgroundColor(this.currentSongId === music.id ? '#22C55E' : '#2563EB')
+                    .fontColor('#FFFFFF')
+                    .borderRadius(12)
+                    .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                    .onClick(() => { void this.onPhonePlay(music.id); })
+                } else {
+                  Text(music.device).fontSize(10).fontColor('#A78BFA')
+                }
               }
               Progress({ value: music.progress, total: 100, style: ProgressStyle.Linear })
                 .color('#8B5CF6')

@@ -144,7 +144,7 @@ export struct CollaborationModule {
     const role = this.detectRole();
     this.deviceRole = role;
     const backendConfig = new CollaborationBackendConfig();
-    backendConfig.baseUrl = 'http://192.168.26.191:3002';
+    backendConfig.baseUrl = 'http://10.0.2.2:3002';
     backendConfig.deviceId = role === 'car' ? 'car-001' : 'phone-001';
     backendConfig.userId = '10001';
     this.viewModel.configureBackend(backendConfig);

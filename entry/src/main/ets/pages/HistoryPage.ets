@@ -277,6 +277,7 @@ struct HistoryPage {
       latitude: item.endLat,
       longitude: item.endLng
     })
+    AppStorage.setOrCreate('navTriggerVersion', Date.now())
 
     router.replace({
       url: 'pages/Index'

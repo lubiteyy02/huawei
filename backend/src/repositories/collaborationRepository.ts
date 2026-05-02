@@ -87,6 +87,17 @@ export async function listContacts(): Promise<CollaborationContactRecord[]> {
   return query<CollaborationContactRecord[]>('SELECT * FROM collaboration_contacts ORDER BY id ASC');
 }
 
+export async function replaceContacts(items: Array<{ name: string; phone: string; tag: string }>): Promise<void> {
+  await query('DELETE FROM collaboration_contacts');
+  if (items.length === 0) return;
+  const values = items.map(() => '(?, ?, ?, ?)').join(', ');
+  const params: Array<string | number> = [];
+  items.forEach((it, idx) => {
+    params.push(idx + 1, it.name, it.phone, it.tag || '手机');
+  });
+  await query(`INSERT INTO collaboration_contacts (id, name, phone, tag) VALUES ${values}`, params);
+}
+
 export async function updateContactTagById(id: number, tag: string): Promise<boolean> {
   const result = await query<{ affectedRows: number }>('UPDATE collaboration_contacts SET tag = ? WHERE id = ?', [tag, id]);
   return Array.isArray(result) ? true : true;
@@ -99,6 +110,18 @@ export async function listThreads(): Promise<CollaborationMessageThreadRecord[]>
 export async function markThreadRead(threadId: number): Promise<boolean> {
   await query('UPDATE collaboration_message_threads SET unread = 0 WHERE id = ?', [threadId]);
   return true;
+}
+
+export async function insertThread(name: string, preview: string, timeText: string): Promise<number> {
+  const existing = await listThreads();
+  let maxId = 0;
+  existing.forEach((t) => { if (t.id > maxId) maxId = t.id; });
+  const nextId = maxId + 1;
+  await query(
+    'INSERT INTO collaboration_message_threads (id, name, preview, time_text, unread) VALUES (?, ?, ?, ?, 1)',
+    [nextId, name, preview, timeText]
+  );
+  return nextId;
 }
 
 export async function listMusicLibrary(): Promise<CollaborationMusicLibraryRecord[]> {
@@ -121,6 +144,15 @@ export async function listContinuationTasks(): Promise<CollaborationContinuation
 export async function completeContinuationTask(taskId: number): Promise<boolean> {
   await query('UPDATE collaboration_continuation_tasks SET completed = 1 WHERE id = ?', [taskId]);
   return true;
+}
+
+export async function insertContinuationTask(moduleName: string, title: string, detailText: string, deviceName: string): Promise<number> {
+  const id = Date.now();
+  await query(
+    'INSERT INTO collaboration_continuation_tasks (id, module_name, title, detail_text, device_name, completed) VALUES (?, ?, ?, ?, ?, 0)',
+    [id, moduleName, title, detailText, deviceName]
+  );
+  return id;
 }
 
 export async function insertSyncLog(messageText: string, sourceLabel: string): Promise<void> {

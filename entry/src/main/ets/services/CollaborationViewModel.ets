@@ -1,5 +1,6 @@
 import { CollaborationDataService, type CollaborationContact, type CollaborationMessageThread, type CollaborationMusicItem, type CollaborationContinuationTask } from './CollaborationDataService'
 import type { CollaborationBackendConfig, MusicStateSnapshot } from './CollaborationApiService'
+import type { ContactBulkItem } from './RealContactsService'
 import { CollaborationSyncSocketService, type CollaborationSyncEvent, type CollaborationSyncEventListener } from './CollaborationSyncSocketService'
 import { RealMusicBridgeService } from './RealMusicBridgeService'
 
@@ -29,23 +30,6 @@ export class CollaborationViewModel {
   }
 
   private handleSyncEvent(event: CollaborationSyncEvent): void {
-    if (event.type === 'music.stateChanged') {
-      const songId = typeof event.payload.songId === 'number' ? event.payload.songId : 0
-      const playing = event.payload.playing === 1 || event.payload.playing === true
-      const position = typeof event.payload.position === 'number' ? event.payload.position : 0
-      if (!this.musicBridge) {
-        this.musicBridge = RealMusicBridgeService.getInstance()
-      }
-      this.musicBridge.updateFromSession({
-        songId,
-        title: '',
-        artist: '',
-        playing,
-        position,
-        sourceDevice: event.sourceDeviceId ?? 'phone'
-      })
-      return
-    }
     void event
   }
 
@@ -71,6 +55,22 @@ export class CollaborationViewModel {
 
   async syncMusic(songId: number, playing: boolean, position: number): Promise<boolean> {
     return this.service.syncMusicState(songId, playing, position)
+  }
+
+  async handoverMusic(songId: number, position: number, target: string): Promise<boolean> {
+    return this.service.handoverMusic(songId, position, target)
+  }
+
+  async uploadContacts(items: ContactBulkItem[]): Promise<boolean> {
+    return this.service.bulkUploadContacts(items)
+  }
+
+  async createMessage(name: string, preview: string): Promise<boolean> {
+    return this.service.createMessage(name, preview)
+  }
+
+  async navigationHandover(name: string, address: string, latitude: number, longitude: number): Promise<boolean> {
+    return this.service.navigationHandover(name, address, latitude, longitude)
   }
 
   async loadMusicState(): Promise<MusicStateSnapshot | null> {

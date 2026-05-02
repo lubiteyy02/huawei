@@ -70,13 +70,17 @@ router.delete('/frequent-locations/:id', authMiddleware, frequentLocationControl
 router.get('/sync/overview', collaborationController.getOverview);
 router.get('/sync/contacts', collaborationController.getContacts);
 router.post('/sync/contacts/tag', collaborationController.updateContactTag);
+router.post('/sync/contacts/bulk', collaborationController.bulkReplaceContacts);
 router.get('/sync/messages', collaborationController.getMessageThreads);
 router.post('/sync/messages/read', collaborationController.markMessageRead);
+router.post('/sync/messages/create', collaborationController.createMessage);
 router.get('/sync/music/library', collaborationController.getMusicLibrary);
 router.get('/sync/continuation/list', collaborationController.getContinuationList);
 router.post('/sync/continuation/resume', collaborationController.resumeContinuation);
 router.post('/sync/music/state', collaborationController.updateMusicState);
 router.get('/sync/music/state', collaborationController.getMusicState);
+router.post('/sync/music/handover', collaborationController.handoverMusic);
+router.post('/sync/navigation/handover', collaborationController.navigationHandover);
 router.post('/sync/log', collaborationController.addLog);
 
 // ========== 多媒体资源相关路由 ==========

@@ -3,8 +3,10 @@
  */
 import { FavoriteService } from '../services/FavoriteService'
 import { FavoritePlace } from '../models/BackendModels'
+import { CollaborationViewModel } from '../services/CollaborationViewModel'
 import router from '@ohos.router'
 import promptAction from '@ohos.promptAction'
+import deviceInfo from '@ohos.deviceInfo'
 
 @Entry
 @Component
@@ -12,10 +14,14 @@ struct FavoritesPage {
   @State favorites: FavoritePlace[] = []
   @State isLoading: boolean = false
   @State errorMessage: string = ''
-  
+  @State isCarDevice: boolean = false
+
   private favoriteService: FavoriteService = FavoriteService.getInstance()
-  
+  private collabVm: CollaborationViewModel = CollaborationViewModel.getInstance()
+
   aboutToAppear() {
+    const t: string = (deviceInfo.deviceType || '').toLowerCase()
+    this.isCarDevice = t === 'tablet' || t === 'car' || t === '2in1'
     this.loadFavorites()
   }
   
@@ -144,7 +150,18 @@ struct FavoritesPage {
           .onClick(() => {
             this.navigateToPlace(item)
           })
-        
+
+        if (!this.isCarDevice) {
+          Button('续接车机')
+            .fontSize(14)
+            .height(32)
+            .backgroundColor('#34C759')
+            .margin({ left: 10 })
+            .onClick(() => {
+              this.handoverToCar(item)
+            })
+        }
+
         Button('删除')
           .fontSize(14)
           .height(32)
@@ -202,6 +219,7 @@ struct FavoritesPage {
       latitude: item.latitude,
       longitude: item.longitude
     });
+    AppStorage.setOrCreate('navTriggerVersion', Date.now());
     console.log('[FavoritesPage] 已写入 AppStorage 导航目的地');
     
     router.replace({
@@ -209,7 +227,21 @@ struct FavoritesPage {
     });
     console.log('[FavoritesPage] ========== 已跳转到首页 ==========');
   }
-  
+
+  /**
+   * 续接到车机：通过协同后端推送导航事件，车机端会自动启动导航
+   */
+  async handoverToCar(item: FavoritePlace) {
+    console.log('[FavoritesPage] handover to car:', item.name)
+    try {
+      const ok = await this.collabVm.navigationHandover(item.name, item.address || '', item.latitude, item.longitude)
+      promptAction.showToast({ message: ok ? `已推送到车机：${item.name}` : '推送失败，请检查后端连接', duration: 1800 })
+    } catch (e) {
+      console.error('[FavoritesPage] handover failed:', e)
+      promptAction.showToast({ message: '推送失败', duration: 1500 })
+    }
+  }
+
   /**
    * 显示删除确认对话框
    */

@@ -24,7 +24,8 @@ struct Index {
   
   // 导航目的地参数
   @State navigationDestination: FavoritePlace | null = null
-  private checkInterval: number = -1
+  // 事件式触发：业务方更新 navigationDestination 后将 navTriggerVersion 自增，本组件通过 @Watch 立即响应，避免 100ms 轮询
+  @StorageProp('navTriggerVersion') @Watch('onNavTrigger') private navTriggerVersion: number = 0
 
   // === 坐标系统 ===
   @State ballX: number = 0
@@ -72,60 +73,19 @@ struct Index {
       console.error('[Index] 初始化窗口失败:', err);
     }
     
-    // 启动定时器检查AppStorage
-    this.startCheckingAppStorage();
-    
-    // 立即检查一次导航目的地
-    setTimeout(() => {
-      this.checkNavigationDestination();
-    }, 500);
-    
+    // 立即检查一次（处理冷启动时已经写入 AppStorage 的目的地）
+    this.checkNavigationDestination();
+
     console.log('[Index] ========== aboutToAppear 完成 ==========');
   }
-  
-  aboutToDisappear() {
-    console.log('[Index] aboutToDisappear - 清理定时器');
-    // 清除定时器
-    if (this.checkInterval !== -1) {
-      clearInterval(this.checkInterval);
-    }
-  }
-  
+
+  aboutToDisappear() {}
+
   /**
-   * 启动定时器检查AppStorage中的导航目的地
+   * AppStorage 中的 navTriggerVersion 变化时立即响应（事件式，无轮询）
    */
-  startCheckingAppStorage() {
-    console.log('[Index] 启动AppStorage监听 - 开始');
-    let checkCount = 0;
-    this.checkInterval = setInterval(() => {
-      checkCount++;
-      if (checkCount % 50 === 0) {
-        console.log('[Index] AppStorage检查中... 已检查', checkCount, '次');
-      }
-      
-      // 检查是否需要切换到导航Tab
-      const shouldSwitch = AppStorage.get<boolean>('shouldSwitchToNavigation');
-      const navDest = AppStorage.get<FavoritePlace>('navigationDestination');
-      
-      if (shouldSwitch && navDest) {
-        console.log('[Index] ✅ 检测到导航请求:', navDest.name);
-        
-        // 清除标志
-        AppStorage.delete('shouldSwitchToNavigation');
-        AppStorage.delete('navigationDestination');
-        
-        // 先切换Tab
-        console.log('[Index] 准备切换到导航Tab (index=1)');
-        this.currentIndex = 1;
-        this.controller.changeIndex(1);
-        
-        // 延迟设置导航目的地,确保Tab切换完成
-        setTimeout(() => {
-          this.navigationDestination = navDest;
-          console.log('[Index] ✅ 已完成Tab切换和导航目的地设置');
-        }, 300);
-      }
-    }, 100);
+  onNavTrigger() {
+    this.checkNavigationDestination();
   }
   
   onPageShow() {
@@ -173,23 +133,20 @@ struct Index {
   }
   
   /**
-   * 检查并处理导航目的地
+   * 检查并处理导航目的地（同步执行，无延迟）
    */
   checkNavigationDestination() {
     const navDest = AppStorage.get<FavoritePlace>('navigationDestination');
-    if (navDest) {
-      // 清除AppStorage中的参数
-      AppStorage.delete('navigationDestination');
-      // 先清空再设置，确保导航模块能感知到变化
-      this.navigationDestination = null;
-      setTimeout(() => {
-        this.currentIndex = 1;
-        this.controller.changeIndex(1);
-        setTimeout(() => {
-          this.navigationDestination = navDest;
-        }, 150);
-      }, 50);
-    }
+    if (!navDest) return;
+    // 清除标志，避免重复触发
+    AppStorage.delete('navigationDestination');
+    AppStorage.delete('shouldSwitchToNavigation');
+    // 切到导航 Tab
+    this.currentIndex = 1;
+    this.controller.changeIndex(1);
+    // 先置 null 再赋新值，确保 @Prop externalDestination 必然变化
+    this.navigationDestination = null;
+    this.navigationDestination = navDest;
   }
 
   toggleExpand() {

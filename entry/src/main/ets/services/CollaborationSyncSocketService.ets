@@ -1,6 +1,6 @@
 import webSocket from '@ohos.net.webSocket'
 
-export type CollaborationSyncEventType = 'contact.updated' | 'message.read' | 'music.stateChanged' | 'continuation.resumed' | 'overview.refreshed'
+export type CollaborationSyncEventType = 'contact.updated' | 'message.read' | 'message.created' | 'music.stateChanged' | 'music.handover' | 'continuation.resumed' | 'navigation.handover' | 'overview.refreshed'
 
 export interface CollaborationSyncEvent {
   type: CollaborationSyncEventType;
@@ -33,6 +33,10 @@ export class CollaborationSyncSocketService {
   private client: CollaborationSocketClient | null = null
   private userId: string = ''
   private deviceId: string = ''
+  private url: string = ''
+  private connected: boolean = false
+  private reconnectTimer: number = -1
+  private manualClose: boolean = false
 
   static getInstance(): CollaborationSyncSocketService {
     if (!CollaborationSyncSocketService.instance) {
@@ -44,11 +48,15 @@ export class CollaborationSyncSocketService {
   connect(url: string, userId: string, deviceId: string): void {
     this.userId = userId
     this.deviceId = deviceId
+    this.url = url
+    this.manualClose = false
 
     if (!this.client) {
       this.client = webSocket.createWebSocket() as CollaborationSocketClient
       const client = this.client
       client.on('open', () => {
+        console.info('[SyncSocket] open')
+        this.connected = true
         const subscribeMessage = JSON.stringify({
           type: 'subscribe',
           userId: this.userId,
@@ -72,12 +80,37 @@ export class CollaborationSyncSocketService {
           return
         }
       })
+      client.on('close', (_err: object) => {
+        console.warn('[SyncSocket] closed, scheduling reconnect')
+        this.connected = false
+        this.scheduleReconnect()
+      })
+      client.on('error', (_err: object) => {
+        console.warn('[SyncSocket] error, scheduling reconnect')
+        this.connected = false
+        this.scheduleReconnect()
+      })
     }
 
     const client = this.client
     client.connect(url, (_err: object | null, _data: boolean) => {
       return
     })
+  }
+
+  private scheduleReconnect(): void {
+    if (this.manualClose) return
+    if (this.reconnectTimer !== -1) return
+    this.reconnectTimer = setTimeout((): void => {
+      this.reconnectTimer = -1
+      if (this.manualClose || this.connected) return
+      console.info('[SyncSocket] reconnecting...')
+      if (this.client && this.url !== '') {
+        this.client.connect(this.url, (_err: object | null, _data: boolean) => {
+          return
+        })
+      }
+    }, 3000)
   }
 
   addListener(listener: CollaborationSyncEventListener): void {
@@ -96,6 +129,11 @@ export class CollaborationSyncSocketService {
   }
 
   close(): void {
+    this.manualClose = true
+    if (this.reconnectTimer !== -1) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = -1
+    }
     if (this.client) {
       this.client.close(() => {
         return
@@ -103,6 +141,7 @@ export class CollaborationSyncSocketService {
     }
     this.listeners.splice(0, this.listeners.length)
     this.client = null
+    this.connected = false
   }
 }
 

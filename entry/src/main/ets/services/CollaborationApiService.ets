@@ -1,4 +1,5 @@
 import http from '@ohos.net.http'
+import type { ContactBulkItem } from './RealContactsService'
 import type {
   CollaborationContact,
   CollaborationMessageThread,
@@ -103,7 +104,7 @@ class MusicStateResponse {
 }
 
 const defaultConfig = new CollaborationSyncConfig(
-  'http://192.168.26.191:3002',
+  'http://10.0.2.2:3002',
   'car-001',
   '10001'
 )
@@ -245,6 +246,30 @@ export class CollaborationApiService {
       updatedAt: new Date().toISOString()
     }
     const res = await this.requestJson<CollaborationSyncPayload<MusicStateResponse>>('/api/v1/sync/music/state', http.RequestMethod.POST, JSON.stringify(body))
+    return !!(res && res.code === 0)
+  }
+
+  async handoverMusic(songId: number, position: number, target: string): Promise<boolean> {
+    const body = JSON.stringify({ songId, position, target })
+    const res = await this.requestJson<CollaborationSyncPayload<object>>('/api/v1/sync/music/handover', http.RequestMethod.POST, body)
+    return !!(res && res.code === 0)
+  }
+
+  async bulkUploadContacts(items: ContactBulkItem[]): Promise<boolean> {
+    const body = JSON.stringify({ items })
+    const res = await this.requestJson<CollaborationSyncPayload<object>>('/api/v1/sync/contacts/bulk', http.RequestMethod.POST, body)
+    return !!(res && res.code === 0)
+  }
+
+  async createMessage(name: string, preview: string): Promise<boolean> {
+    const body = JSON.stringify({ name, preview })
+    const res = await this.requestJson<CollaborationSyncPayload<object>>('/api/v1/sync/messages/create', http.RequestMethod.POST, body)
+    return !!(res && res.code === 0)
+  }
+
+  async navigationHandover(name: string, address: string, latitude: number, longitude: number): Promise<boolean> {
+    const body = JSON.stringify({ name, address, latitude, longitude })
+    const res = await this.requestJson<CollaborationSyncPayload<object>>('/api/v1/sync/navigation/handover', http.RequestMethod.POST, body)
     return !!(res && res.code === 0)
   }
 }

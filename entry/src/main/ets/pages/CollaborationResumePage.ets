@@ -27,6 +27,11 @@ struct CollaborationResumePage {
       }
       return;
     }
+    if (event.type === 'navigation.handover') {
+      this.lastSyncHint = `${event.type} · ${event.timestamp}`;
+      void this.refreshContinuation();
+      return;
+    }
     if (event.type === 'overview.refreshed') {
       this.lastSyncHint = `${event.type} · ${event.timestamp}`;
       return;
