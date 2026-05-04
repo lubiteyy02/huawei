@@ -79,12 +79,25 @@ export struct CarStatusModule {
   }
 
   build() {
-    // 窄屏（手机竖屏）走单列纵向滚动布局，宽屏（车机/平板）保留双列
-    if (this.isNarrow) {
-      this.NarrowLayout()
-    } else {
-      this.WideLayout()
+    // 用外层 Stack + onAreaChange 实测容器宽度，比 display.getDefaultDisplaySync() 更可靠：
+    // - 旋屏、分屏、父容器尺寸变化都能同步
+    // - 避免模拟器上 display 单位/密度换算出错导致 isNarrow 始终 false
+    Stack() {
+      if (this.isNarrow) {
+        this.NarrowLayout()
+      } else {
+        this.WideLayout()
+      }
     }
+    .width('100%')
+    .height('100%')
+    .onAreaChange((_old: Area, area: Area) => {
+      const w = Number(area.width);
+      if (!isNaN(w) && w > 0) {
+        const narrow = w < 600;
+        if (narrow !== this.isNarrow) this.isNarrow = narrow;
+      }
+    })
   }
 
   /**

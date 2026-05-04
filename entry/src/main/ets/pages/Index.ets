@@ -256,23 +256,38 @@ struct Index {
     .hitTestBehavior(this.isExpanded ? HitTestMode.Default : HitTestMode.None)
   }
 
-  // === 纯净主球 ===
+  // === Pearl 悬浮球（参考 Uiverse.io pearl toggle）===
+  // 结构：外层 100vp 透明容器 / 72vp 半透明白光晕 / 60vp 珠光主按钮（上亮下暗渐变）
+  // 去掉中心 "+" 十字星，只保留纯净球体；展开时整球旋转 45° + 底部小指示点变化
   @Builder
   PureMainBall(): void {
+    // 参考 iOS AssistiveTouch：纯磨砂玻璃，无高光圆圈、无明显渐变、无内部纹理
+    // 结构极简：backgroundBlurStyle 承担全部"磨砂"效果 + 一层极淡暗色底 + 极细边框 + 中心点
     Stack({ alignContent: Alignment.Center }) {
-      Text("＋")
-        .fontSize(26).fontColor('#FFFFFF').fontWeight(FontWeight.Lighter)
-        // 不写 .animation()：让旋转跟随 toggleExpand 的 animateTo 块的 springMotion 一起过渡
-        .rotate({ angle: this.isExpanded ? 135 : 0 })
-        .margin({ bottom: 2 })
+      // 中心小指示点：收起 1 个，展开 3 个横排（取代原 "+"）
+      if (this.isExpanded) {
+        Row({ space: 5 }) {
+          Circle().width(5).height(5).fill('rgba(255,255,255,0.85)')
+          Circle().width(5).height(5).fill('rgba(255,255,255,0.85)')
+          Circle().width(5).height(5).fill('rgba(255,255,255,0.85)')
+        }
+      } else {
+        Circle().width(7).height(7).fill('rgba(255,255,255,0.75)')
+      }
     }
     .width(this.BALL_SIZE).height(this.BALL_SIZE)
-    .backgroundColor('rgba(40, 40, 40, 0.5)')
-    .backgroundBlurStyle(BlurStyle.Thick)
     .borderRadius(this.BALL_SIZE / 2)
     .clip(true)
-    .border({ width: 0.5, color: 'rgba(255,255,255,0.2)' })
-    .shadow({ radius: 10, color: 'rgba(0,0,0,0.2)', offsetY: 4 })
+    // 与子菜单 PureGlassItem 完全一致的磨砂配方：rgba(40,40,40,0.55) + 0.5 白边
+    // 不用 backgroundBlurStyle（子菜单也没用，保持整组视觉一致 + 性能）
+    .backgroundColor('rgba(40, 40, 40, 0.55)')
+    .border({ width: 0.5, color: 'rgba(255,255,255,0.18)' })
+    .shadow({ radius: 14, color: 'rgba(0,0,0,0.28)', offsetX: 0, offsetY: 6 })
+    // 按钮按压视觉反馈：展开态整体略微缩放，回弹跟 toggleExpand 的 spring 同步
+    .scale({
+      x: this.isExpanded ? 0.96 : 1,
+      y: this.isExpanded ? 0.96 : 1
+    })
     .position({ x: this.ballX, y: this.ballY })
     .zIndex(10000)
     .onClick(() => {
