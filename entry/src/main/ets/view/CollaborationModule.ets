@@ -350,7 +350,10 @@ export struct CollaborationModule {
                       .backgroundColor('#8B5CF6')
                       .fontColor('#FFFFFF')
                       .borderRadius(14)
-                      .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+                      // 固定按钮尺寸，让 4 张卡片右侧按钮严格对齐（5 字 vs 4 字不再差宽度）
+                      .width(96)
+                      .height(36)
+                      .padding(0)
                       .onClick(() => {
                         if (entry.id === 'contacts') {
                           router.pushUrl({ url: 'pages/CollaborationContactsPage' });
