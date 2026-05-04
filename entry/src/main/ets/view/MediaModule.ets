@@ -109,8 +109,6 @@ export struct MediaModule {
   @State tabPressOffset: number = 0;
   @State failedRadioIds: Array<string> = [];
   @State @Watch('onActiveLyricChanged') activeLyricIndex: number = 0;
-  // 当前歌曲的歌词整体偏移（毫秒）。正值=歌词比音频晚（往前推），负值=歌词比音频早（往后推）
-  @State lyricOffsetMs: number = 0;
 
   private avPlayer: media.AVPlayer | undefined;
   private pendingAutoplay: boolean = false;
@@ -136,11 +134,9 @@ export struct MediaModule {
   private computeActiveLyricIndex(time: number): number {
     const lyrics = this.getCurrentLyrics();
     if (lyrics.length === 0) return 0;
-    // 应用用户实时校准的偏移：等价于把音频时间整体平移
-    const adjusted: number = time - this.lyricOffsetMs;
     let idx = 0;
     for (let i = 0; i < lyrics.length; i++) {
-      if (adjusted >= lyrics[i].time) idx = i;
+      if (time >= lyrics[i].time) idx = i;
       else break;
     }
     return idx;
@@ -153,9 +149,9 @@ export struct MediaModule {
     new LocalMediaItem(3, '以父之名', '本地缓存', 'https://images.pexels.com/photos/167092/pexels-photo-167092.jpeg?auto=compress&cs=tinysrgb&w=600', 'rawfile:sample_music_3.mp3', '离线音乐', 'music')
   ];
 
-  private radioItems: LocalMediaItem[] = [
-    new LocalMediaItem(101, '晨间电台', '本地缓存', 'https://images.pexels.com/photos/164938/pexels-photo-164938.jpeg?auto=compress&cs=tinysrgb&w=600', 'rawfile:radio_1.mp3', '离线电台', 'radio')
-  ];
+  // 必须用 @State，否则 loadRadioStations() 异步赋值后 UI 不会重渲染。
+  // 初始为空数组，进入电台 Tab 后通过 loadRadioStations() 拉在线列表填充。
+  @State radioItems: LocalMediaItem[] = [];
   // v2: 修复 UTF-8 解码后需要让旧版乱码缓存失效
   private radioStationCacheKey: string = 'radio_stations_clean_cache_v2';
 
@@ -266,6 +262,19 @@ export struct MediaModule {
     this.initPlayer();
     this.defaultCoverVisible = !this.currentItem && !this.isPlaying;
     void this.loadLocalCache();
+    // 启动胶片恒时转动（仿黑胶唱机）；播放中会加速，闲置也能看见轻转
+    this.startIdleRotation();
+  }
+
+  /**
+   * 闲置胶片转动：每 60ms 转 0.6°，近似 33 RPM 黑胶唱机。
+   * 播放中 startAnimations() 会重新启动为更快的 timer。
+   */
+  private startIdleRotation(): void {
+    if (this.rotateTimer !== -1) return;
+    this.rotateTimer = setInterval(() => {
+      this.rotateAngle = (this.rotateAngle + 0.6) % 360;
+    }, 60);
   }
 
   aboutToDisappear(): void {
@@ -426,7 +435,11 @@ export struct MediaModule {
   }
 
   private cleanup(): void {
-    this.stopAnimations();
+    // 完全停止：清理 timer 但不再回退到 idle，避免页面卸载后仍有定时器
+    if (this.rotateTimer !== -1) {
+      clearInterval(this.rotateTimer);
+      this.rotateTimer = -1;
+    }
     try {
       this.avPlayer?.release();
     } catch (err) {
@@ -435,7 +448,11 @@ export struct MediaModule {
   }
 
   private startAnimations(): void {
-    this.stopAnimations();
+    // 直接清掉当前 timer（无论是 idle 还是上次的 fast），不要走 stopAnimations 否则会回退到 idle 再被覆盖
+    if (this.rotateTimer !== -1) {
+      clearInterval(this.rotateTimer);
+      this.rotateTimer = -1;
+    }
     this.rotateTimer = setInterval(() => {
       this.rotateAngle = (this.rotateAngle + 1.2) % 360;
     }, 30);
@@ -446,6 +463,8 @@ export struct MediaModule {
       clearInterval(this.rotateTimer);
       this.rotateTimer = -1;
     }
+    // 暂停/停止时回退到闲置慢速转动，保持视觉连续
+    this.startIdleRotation();
   }
 
   private getCurrentLyrics(): LyricLine[] {
@@ -576,7 +595,6 @@ export struct MediaModule {
       this.statusText = item.mediaType === 'radio' ? `电台：${item.title}（准备中）` : `本地缓存：${item.title}`;
       this.emptyHint = '';
       this.activeLyricIndex = 0;
-      this.lyricOffsetMs = 0;
       // 切换歌曲时尝试加载同名 .lrc，失败则回退硬编码
       void this.loadLyricsForItem(item);
 
@@ -696,7 +714,7 @@ export struct MediaModule {
 
   private async switchTab(tab: TabType): Promise<void> {
     if (this.activeTab === tab) {
-      if (tab === TabType.RADIO && this.radioItems.length <= 1) {
+      if (tab === TabType.RADIO && this.radioItems.length === 0) {
         void this.loadRadioStations();
       }
       return;
@@ -731,7 +749,7 @@ export struct MediaModule {
     this.isSearchPanelVisible = false;
     this.emptyHint = '';
 
-    if (tab === TabType.RADIO && this.radioItems.length <= 1) {
+    if (tab === TabType.RADIO && this.radioItems.length === 0) {
       void this.loadRadioStations();
     } else {
       void this.loadLocalCache();
@@ -929,13 +947,13 @@ export struct MediaModule {
           this.PillButton('电台', this.activeTab === TabType.RADIO, () => { void this.switchTab(TabType.RADIO); }, TabType.RADIO)
         }
         .width('100%')
-        .padding({ left: 18, right: 18, bottom: 8 })
+        // 高度需要容纳 PillButton 自身高度（34）+ 按下动画位移（10）+ 上下少量留白
+        .height(54)
+        .padding({ left: 18, right: 18, top: 4, bottom: 16 })
+        .clip(false)
 
-        Text(this.emptyHint)
-          .fontSize(12)
-          .fontColor(this.activeAccent)
-          .padding({ left: 18, right: 18, bottom: 6 })
-
+        // 移除独立的 emptyHint 文本：状态会跟随 currentItem/列表变化在底部 statusText 一处显示，
+        // 避免空字符串/有字符串切换导致下方模块上下抖动
         if (this.isSearchPanelVisible) {
           Stack() {
             Rect()
@@ -1016,31 +1034,61 @@ export struct MediaModule {
           Row() {
             Stack({ alignContent: Alignment.Center }) {
               if (this.defaultCoverVisible || !this.currentItem) {
+                // 黑胶唱片：整体随 rotateAngle 转动；外圈胶面 + 多圈刻槽 + 中心标签 + 中心轴孔
+                // 注意：Circle 的圆环要用 stroke / strokeWidth（基于圆形），不能用 border（基于矩形包围盒，会出现菱形）
                 Stack({ alignContent: Alignment.Center }) {
-                  Circle()
-                    .width(132)
-                    .height(132)
-                    .fill('rgba(255,255,255,0.04)')
+                  // 0) 外层圆角"唱片套"（圆角矩形，作为黑胶背后的封套底板）
+                  Column()
+                    .width(132).height(132)
+                    .backgroundColor('rgba(255,255,255,0.05)')
+                    .border({ width: 1, color: 'rgba(255,255,255,0.10)' })
+                    .borderRadius(20)
 
+                  // 1) 唱片主盘（深黑底，缩小一点让封套露出来）
                   Circle()
-                    .width(118)
-                    .height(118)
-                    .fill('rgba(255,255,255,0.08)')
+                    .width(116).height(116)
+                    .fill('#0B0F18')
 
+                  // 2) 唱片刻槽：多圈描边（fillOpacity=0 + stroke）
                   Circle()
-                    .width(86)
-                    .height(86)
-                    .fill('rgba(56,189,248,0.22)')
+                    .width(108).height(108)
+                    .fillOpacity(0)
+                    .stroke('rgba(255,255,255,0.10)')
+                    .strokeWidth(0.6)
+                  Circle()
+                    .width(96).height(96)
+                    .fillOpacity(0)
+                    .stroke('rgba(255,255,255,0.08)')
+                    .strokeWidth(0.6)
+                  Circle()
+                    .width(84).height(84)
+                    .fillOpacity(0)
+                    .stroke('rgba(255,255,255,0.07)')
+                    .strokeWidth(0.6)
+                  Circle()
+                    .width(72).height(72)
+                    .fillOpacity(0)
+                    .stroke('rgba(255,255,255,0.06)')
+                    .strokeWidth(0.6)
 
-                  Image('https://images.pexels.com/photos/16767318/pexels-photo-16767318.jpeg?auto=compress&cs=tinysrgb&w=600')
-                    .width(78)
-                    .height(78)
-                    .borderRadius(39)
-                    .rotate({ angle: this.rotateAngle })
-                    .objectFit(ImageFit.Cover)
+                  // 3) 中心标签（深色低调，不喧宾夺主）
+                  Circle()
+                    .width(40).height(40)
+                    .fillOpacity(0)
+                    .stroke('rgba(255,255,255,0.14)')
+                    .strokeWidth(1)
+                  Circle()
+                    .width(38).height(38)
+                    .fill('#161D2E')
+
+                  // 4) 中心轴孔
+                  Circle()
+                    .width(6).height(6)
+                    .fill('#0B0F18')
                 }
                 .width(132)
                 .height(132)
+                .rotate({ angle: this.rotateAngle, centerX: '50%', centerY: '50%' })
               } else {
                 Image(this.currentItem.cover)
                   .width(132)
@@ -1061,45 +1109,13 @@ export struct MediaModule {
             .height(160)
 
             Column() {
-              if (!this.defaultCoverVisible && this.currentItem) {
-                Row() {
-                  Text('歌词')
-                    .fontSize(15)
-                    .fontWeight(FontWeight.Bold)
-                    .fontColor('#FFFFFF')
-                    .layoutWeight(1)
-
-                  // 实时校准：把歌词整体往前/往后推 0.5 秒，直到与音频同步
-                  Text('-0.5s')
-                    .fontSize(11)
-                    .fontColor('#FFFFFF')
-                    .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-                    .backgroundColor('rgba(255,255,255,0.14)')
-                    .borderRadius(8)
-                    .onClick(() => {
-                      this.lyricOffsetMs -= 500;
-                      // 立即重新计算当前行
-                      this.activeLyricIndex = this.computeActiveLyricIndex(this.currentTime);
-                    })
-
-                  Text(`${this.lyricOffsetMs >= 0 ? '+' : ''}${(this.lyricOffsetMs / 1000).toFixed(1)}s`)
-                    .fontSize(10)
-                    .fontColor('rgba(255,255,255,0.7)')
-                    .margin({ left: 6, right: 6 })
-
-                  Text('+0.5s')
-                    .fontSize(11)
-                    .fontColor('#FFFFFF')
-                    .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-                    .backgroundColor('rgba(255,255,255,0.14)')
-                    .borderRadius(8)
-                    .onClick(() => {
-                      this.lyricOffsetMs += 500;
-                      this.activeLyricIndex = this.computeActiveLyricIndex(this.currentTime);
-                    })
-                }
-                .width('100%')
-                .margin({ bottom: 10 })
+              if (!this.defaultCoverVisible && this.currentItem && this.currentItem.mediaType === 'music') {
+                // 仅音乐模式显示歌词面板；电台/默认胶片态都不显示
+                Text('歌词')
+                  .fontSize(15)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor('#FFFFFF')
+                  .margin({ bottom: 10 })
 
                 if (this.getCurrentLyrics().length === 0) {
                   Text('暂无歌词')
@@ -1125,12 +1141,42 @@ export struct MediaModule {
                           void this.seekToLyric(line.time);
                         })
                     }
-                  }, (line: LyricLine, idx: number) => `${idx}-${line.time}`)
+                  }, (line: LyricLine, idx: number) => `${this.currentItem ? this.currentItem.id : 0}-${idx}-${line.time}-${line.text}`)
                 }
                 .layoutWeight(1)
                 .width('100%')
                 .scrollBar(BarState.Off)
                 .edgeEffect(EdgeEffect.Spring)
+              } else if (this.defaultCoverVisible && this.activeTab === TabType.MUSIC) {
+                // 音乐 Tab + 未选歌：黑胶右侧的引导文案 + 模拟音波
+                Text('多媒体娱乐')
+                  .fontSize(16)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor('#FFFFFF')
+                Text('选一首歌，开始播放')
+                  .fontSize(12)
+                  .fontColor('rgba(255,255,255,0.55)')
+                  .margin({ top: 4, bottom: 14 })
+
+                // 模拟音波：5 根高低不一的圆角小条
+                Row({ space: 6 }) {
+                  Column().width(4).height(18).backgroundColor('#38BDF8').borderRadius(2)
+                  Column().width(4).height(28).backgroundColor('#60A5FA').borderRadius(2)
+                  Column().width(4).height(14).backgroundColor('#818CF8').borderRadius(2)
+                  Column().width(4).height(34).backgroundColor('#38BDF8').borderRadius(2)
+                  Column().width(4).height(22).backgroundColor('#60A5FA').borderRadius(2)
+                  Column().width(4).height(12).backgroundColor('#818CF8').borderRadius(2)
+                  Column().width(4).height(26).backgroundColor('#38BDF8').borderRadius(2)
+                }
+                .alignItems(VerticalAlign.Center)
+                .margin({ bottom: 12 })
+
+                Text('· 离线缓存 3 首')
+                  .fontSize(11)
+                  .fontColor('rgba(255,255,255,0.45)')
+                Text('· 支持 LRC 歌词同步')
+                  .fontSize(11)
+                  .fontColor('rgba(255,255,255,0.45)')
               } else {
                 Text('')
                   .fontSize(13)

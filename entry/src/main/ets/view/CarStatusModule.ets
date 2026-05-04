@@ -1,3 +1,5 @@
+import { display } from '@kit.ArkUI';
+
 interface MileageBar {
   day: string;
   value: number;
@@ -5,6 +7,9 @@ interface MileageBar {
 
 @Component
 export struct CarStatusModule {
+  // 是否为窄屏（手机竖屏）；< 600vp 时切换为单列纵向流
+  @State isNarrow: boolean = false;
+  @State screenWidthVp: number = 1000;
   // === 核心仿真数据 ===
   @State speed: number = 0;
   @State battery: number = 88;
@@ -34,6 +39,15 @@ export struct CarStatusModule {
   private slowTimer: number = -1;
 
   aboutToAppear() {
+    // 屏幕宽度检测：手机竖屏 ~360-420vp，平板/车机 ≥600vp
+    try {
+      const d = display.getDefaultDisplaySync();
+      this.screenWidthVp = d.width / d.densityPixels;
+      this.isNarrow = this.screenWidthVp < 600;
+    } catch (err) {
+      this.isNarrow = false;
+    }
+
     // 高频更新：速度/心跳（保留原有速度模拟）
     this.timer = setInterval(() => {
       this.speed = this.speed < 120 ? this.speed + 1 : 0;
@@ -65,6 +79,243 @@ export struct CarStatusModule {
   }
 
   build() {
+    // 窄屏（手机竖屏）走单列纵向滚动布局，宽屏（车机/平板）保留双列
+    if (this.isNarrow) {
+      this.NarrowLayout()
+    } else {
+      this.WideLayout()
+    }
+  }
+
+  /**
+   * 窄屏布局：所有卡片纵向堆叠，整体可滚动；适合手机竖屏 < 600vp
+   */
+  @Builder
+  NarrowLayout() {
+    Scroll() {
+      Column({ space: 12 }) {
+        // 顶部标题
+        Row() {
+          Row({ space: 8 }) {
+            Circle().width(8).height(8).fill('#00FFA3')
+              .shadow({ radius: 8, color: '#00FFA3', offsetX: 0, offsetY: 0 })
+            Text('智行座舱').fontSize(16).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
+          }
+          .layoutWeight(1)
+          Text('Tesla Model 3').fontSize(11).fontColor('#64748B')
+        }
+        .width('100%')
+
+        // 状态 Pill 横向滚动
+        Scroll() {
+          Row({ space: 8 }) {
+            this.HeaderPill('车况', '优秀', '#00FFA3')
+            this.HeaderPill('连接', '在线', '#00F0FF')
+            this.HeaderPill('OTA', '最新', '#A78BFA')
+          }
+        }
+        .scrollable(ScrollDirection.Horizontal)
+        .scrollBar(BarState.Off)
+        .width('100%')
+
+        // 速度仪表卡
+        Column() {
+          Row() {
+            Text('驾驶状态').fontSize(13).fontColor('#94A3B8').layoutWeight(1)
+            Text('D · ECO').fontSize(11).fontColor('#00FFA3')
+              .padding({ left: 8, right: 8, top: 3, bottom: 3 })
+              .backgroundColor('rgba(0,255,163,0.12)')
+              .borderRadius(8)
+          }.width('100%')
+
+          Stack({ alignContent: Alignment.Center }) {
+            Circle().width(220).height(220).fill('rgba(0, 240, 255, 0.06)')
+            Circle().width(168).height(168).fill('#0F1726')
+            Gauge({ value: this.speed, min: 0, max: 240 })
+              .startAngle(210).endAngle(150)
+              .colors([['#00FFA3', 0.6], ['#00F0FF', 1.0]])
+              .strokeWidth(16)
+              .description(null)
+              .width(210).height(210)
+            Column() {
+              Text(this.speed.toFixed(0))
+                .fontSize(56).fontWeight(FontWeight.Bold).fontColor(Color.White)
+              Text('km/h').fontSize(12).fontColor('#64748B').margin({ top: -2 })
+              Text(`ECO ${this.ecoScore}`).fontSize(10).fontColor('#94A3B8').margin({ top: 4 })
+            }
+          }
+          .height(230)
+          .width('100%')
+          .margin({ top: 4 })
+
+          Row({ space: 10 }) {
+            this.MiniMetric('舱内', `${this.cabinTemp.toFixed(1)}°`, '🌡️', '#00F0FF')
+            this.MiniMetric('车外', `${this.outsideTemp.toFixed(1)}°`, '☀️', '#FDBA74')
+            this.MiniMetric('电机', `${this.motorTemp.toFixed(0)}°`, '⚡', '#A78BFA')
+          }
+          .width('100%')
+          .margin({ top: 12 })
+        }
+        .width('100%')
+        .padding(16)
+        .borderRadius(20)
+        .backgroundColor('#161E2E')
+        .border({ width: 1, color: 'rgba(255,255,255,0.04)' })
+
+        // 电池卡（全宽）
+        Column() {
+          Row() {
+            Text('动力电池').fontSize(13).fontColor('#94A3B8').layoutWeight(1)
+            Text('健康').fontSize(11).fontColor('#00FFA3')
+              .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+              .backgroundColor('rgba(0,255,163,0.12)')
+              .borderRadius(8)
+          }.width('100%')
+
+          Stack({ alignContent: Alignment.Center }) {
+            Progress({ value: this.battery, total: 100, type: ProgressType.Ring })
+              .width(130).height(130)
+              .style({ strokeWidth: 10, scaleCount: 0 })
+              .color('#00FFA3')
+              .backgroundColor('rgba(255,255,255,0.08)')
+            Column() {
+              Text(`${this.battery.toFixed(0)}%`)
+                .fontSize(30).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
+              Text(`SOH ${this.batteryHealth}%`).fontSize(10).fontColor('#64748B')
+            }
+          }
+          .margin({ top: 12 })
+
+          Row() {
+            Column() {
+              Text('续航').fontSize(10).fontColor('#64748B')
+              Text(`${this.range.toFixed(0)} km`).fontSize(15).fontWeight(FontWeight.Medium).fontColor('#FFFFFF')
+            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+            Column() {
+              Text('功率').fontSize(10).fontColor('#64748B')
+              Text(`${this.chargingPower.toFixed(0)} kW`).fontSize(15).fontWeight(FontWeight.Medium).fontColor('#00F0FF')
+            }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+          }
+          .width('100%').margin({ top: 12 })
+        }
+        .width('100%')
+        .padding(16)
+        .borderRadius(20)
+        .backgroundColor('#161E2E')
+        .border({ width: 1, color: 'rgba(255,255,255,0.04)' })
+
+        // 安全 + 胎压：窄屏并排但简化
+        Row({ space: 12 }) {
+          // 安全
+          Column() {
+            Row() {
+              Text('安全评级').fontSize(12).fontColor('#94A3B8').layoutWeight(1)
+              Text('优秀').fontSize(10).fontColor('#A78BFA')
+                .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+                .backgroundColor('rgba(167,139,250,0.15)')
+                .borderRadius(6)
+            }.width('100%')
+            Column() {
+              Text(`${this.safetyScore}`)
+                .fontSize(36).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
+              Text('/ 100').fontSize(10).fontColor('#64748B').margin({ top: -2 })
+            }.margin({ top: 8 })
+            Progress({ value: this.safetyScore, total: 100 })
+              .color('#A78BFA')
+              .backgroundColor('rgba(255,255,255,0.08)')
+              .height(4)
+              .margin({ top: 8 })
+            Text('本月零违规 ↑ 2').fontSize(10).fontColor('#64748B').margin({ top: 6 })
+          }
+          .layoutWeight(1)
+          .padding(14)
+          .borderRadius(20)
+          .backgroundColor('#161E2E')
+          .border({ width: 1, color: 'rgba(255,255,255,0.04)' })
+
+          // 胎压
+          Column() {
+            Row() {
+              Text('胎压').fontSize(12).fontColor('#94A3B8').layoutWeight(1)
+              Text('正常').fontSize(10).fontColor('#00FFA3')
+                .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+                .backgroundColor('rgba(0,255,163,0.15)')
+                .borderRadius(6)
+            }.width('100%')
+            Column() {
+              Text(`${this.tirePressure.toFixed(2)}`)
+                .fontSize(28).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
+              Text('bar').fontSize(10).fontColor('#64748B')
+            }.margin({ top: 8 })
+            Row({ space: 4 }) {
+              this.TireDot('左前', this.tirePressure)
+              this.TireDot('右前', this.tirePressure + 0.02)
+              this.TireDot('左后', this.tirePressure - 0.01)
+              this.TireDot('右后', this.tirePressure)
+            }.width('100%').margin({ top: 8 })
+          }
+          .layoutWeight(1)
+          .padding(14)
+          .borderRadius(20)
+          .backgroundColor('#161E2E')
+          .border({ width: 1, color: 'rgba(255,255,255,0.04)' })
+        }
+        .width('100%')
+
+        // 7 日里程
+        Column() {
+          Row() {
+            Text('7 日行驶里程').fontSize(13).fontColor('#94A3B8').layoutWeight(1)
+            Text(`${this.odometer} km`).fontSize(10).fontColor('#64748B')
+          }.width('100%')
+
+          Row() {
+            ForEach(this.weekMileage, (bar: MileageBar, idx: number) => {
+              Column() {
+                Column() {
+                  Column()
+                    .width('60%')
+                    .height(`${Math.min(100, bar.value * 0.7)}%`)
+                    .linearGradient({ angle: 0, colors: [['#00F0FF', 0.0], ['#00FFA3', 1.0]] })
+                    .borderRadius({ topLeft: 6, topRight: 6 })
+                }
+                .layoutWeight(1)
+                .width('100%')
+                .justifyContent(FlexAlign.End)
+                .alignItems(HorizontalAlign.Center)
+
+                Text(bar.day).fontSize(10).fontColor('#64748B').margin({ top: 6 })
+                Text(`${bar.value}`).fontSize(9).fontColor('#94A3B8')
+              }
+              .layoutWeight(1)
+              .height('100%')
+            }, (bar: MileageBar, idx: number) => `${idx}-${bar.day}-${bar.value}`)
+          }
+          .width('100%')
+          .height(140)
+          .margin({ top: 10 })
+          .alignItems(VerticalAlign.Bottom)
+        }
+        .width('100%')
+        .padding(16)
+        .borderRadius(20)
+        .backgroundColor('#161E2E')
+        .border({ width: 1, color: 'rgba(255,255,255,0.04)' })
+      }
+      .width('100%')
+      .padding({ left: 14, right: 14, top: 14, bottom: 80 })
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#0B0F19')
+    .scrollBar(BarState.Off)
+  }
+
+  /**
+   * 宽屏布局：原车机/平板双列布局（保留不动）
+   */
+  @Builder
+  WideLayout() {
     Column() {
       // ===== 顶部标题栏 =====
       Row() {

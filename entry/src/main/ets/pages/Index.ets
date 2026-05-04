@@ -149,22 +149,29 @@ struct Index {
     this.navigationDestination = navDest;
   }
 
+  /**
+   * 单次 animateTo 同时驱动 isExpanded + 必要的 ballX/Y 修正，
+   * 让所有依赖这些状态的子组件（菜单 position/scale/opacity、主球加号旋转）共享同一条 spring 曲线，
+   * 避免两次 animateTo 引起的不同步抖动。
+   */
   toggleExpand() {
+    let nextBallX: number = this.ballX;
+    let nextBallY: number = this.ballY;
     if (!this.isExpanded) {
       const safePadding = this.EXPAND_RADIUS + (this.ITEM_SIZE / 2) + 10;
-      let cX = this.ballX + (this.BALL_SIZE / 2);
-      let cY = this.ballY + (this.BALL_SIZE / 2);
-      let nCX = Math.max(safePadding, Math.min(cX, this.screenWidthVp - safePadding));
-      let nCY = Math.max(safePadding, Math.min(cY, this.screenHeightVp - safePadding));
-
-      this.getUIContext().animateTo({ curve: curves.springMotion(0.6, 0.8) }, () => {
-        this.ballX = nCX - (this.BALL_SIZE / 2);
-        this.ballY = nCY - (this.BALL_SIZE / 2);
-      });
+      const cX = this.ballX + (this.BALL_SIZE / 2);
+      const cY = this.ballY + (this.BALL_SIZE / 2);
+      const nCX = Math.max(safePadding, Math.min(cX, this.screenWidthVp - safePadding));
+      const nCY = Math.max(safePadding, Math.min(cY, this.screenHeightVp - safePadding));
+      nextBallX = nCX - (this.BALL_SIZE / 2);
+      nextBallY = nCY - (this.BALL_SIZE / 2);
     }
-    this.getUIContext().animateTo({ curve: curves.springMotion(0.5, 0.7) }, () => {
+    // 0.42 / 0.82 比原来 0.5/0.7 更紧凑，开合感更敏捷
+    this.getUIContext().animateTo({ curve: curves.springMotion(0.42, 0.82) }, () => {
       this.isExpanded = !this.isExpanded;
-    })
+      this.ballX = nextBallX;
+      this.ballY = nextBallY;
+    });
   }
 
   build() {
@@ -205,21 +212,21 @@ struct Index {
   }
 
   // === 纯净磨砂子菜单 ===
+  // 关键：去掉外层 .animation()，让 position/scale/opacity 跟随 toggleExpand 中的 animateTo 块统一过渡，
+  // 避免拖动时 ballX/Y 每帧变化触发独立 spring，造成 5 个 item 各自抖动。
+  // 同时去掉昂贵的 backgroundBlurStyle，子菜单只用半透明色。
   @Builder
   PureGlassItem(item: ModuleConfig): void {
     Column({ space: 4 }) {
       Stack({ alignContent: Alignment.Center }) {
         Text(item.icon)
           .fontSize(24)
-          .fontColor(this.currentIndex === item.index ? '#FFFFFF' : 'rgba(255,255,255,0.8)')
-          .animation({ duration: 150 })
+          .fontColor(this.currentIndex === item.index ? '#FFFFFF' : 'rgba(255,255,255,0.85)')
       }
       .width(this.ITEM_SIZE).height(this.ITEM_SIZE)
-      .backgroundColor(this.currentIndex === item.index ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.1)')
-      .backgroundBlurStyle(this.currentIndex === item.index ? BlurStyle.Regular : BlurStyle.Thin)
+      .backgroundColor(this.currentIndex === item.index ? 'rgba(255, 255, 255, 0.28)' : 'rgba(40, 40, 40, 0.55)')
       .borderRadius(this.ITEM_SIZE / 2)
-      .clip(true)
-      .border({ width: 0.5, color: 'rgba(255,255,255,0.15)' })
+      .border({ width: 0.5, color: 'rgba(255,255,255,0.18)' })
       .onClick(() => {
         if (item.index === 4) {
           router.pushUrl({ url: 'pages/UserCenterPage' })
@@ -227,13 +234,14 @@ struct Index {
         } else {
           this.currentIndex = item.index
           this.controller.changeIndex(item.index)
+          // 选中后顺手收起菜单，减少误点 + 视觉更利落
+          this.toggleExpand()
         }
       })
 
       Text(item.title)
-        .fontSize(10).fontColor('rgba(255,255,255,0.7)').fontWeight(FontWeight.Regular)
+        .fontSize(10).fontColor('rgba(255,255,255,0.75)').fontWeight(FontWeight.Regular)
         .opacity(this.isExpanded ? 1 : 0)
-        .animation({ duration: 200 })
     }
     .position({
       x: this.ballX + (this.BALL_SIZE / 2) - (this.ITEM_SIZE / 2) +
@@ -244,7 +252,8 @@ struct Index {
     .zIndex(9999)
     .scale({ x: this.isExpanded ? 1 : 0.45, y: this.isExpanded ? 1 : 0.45 })
     .opacity(this.isExpanded ? 1 : 0)
-    .animation({ curve: curves.springMotion(0.6, 0.75) })
+    // 收起态用 hitTestBehavior 阻止接收点击，避免折叠后透明 item 误吃事件
+    .hitTestBehavior(this.isExpanded ? HitTestMode.Default : HitTestMode.None)
   }
 
   // === 纯净主球 ===
@@ -253,8 +262,8 @@ struct Index {
     Stack({ alignContent: Alignment.Center }) {
       Text("＋")
         .fontSize(26).fontColor('#FFFFFF').fontWeight(FontWeight.Lighter)
+        // 不写 .animation()：让旋转跟随 toggleExpand 的 animateTo 块的 springMotion 一起过渡
         .rotate({ angle: this.isExpanded ? 135 : 0 })
-        .animation({ duration: 300 })
         .margin({ bottom: 2 })
     }
     .width(this.BALL_SIZE).height(this.BALL_SIZE)

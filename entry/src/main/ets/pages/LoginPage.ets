@@ -99,6 +99,13 @@ struct LoginPage {
     .width('100%')
     .height('100%')
     .backgroundColor('#FFFFFF')
+    .focusable(true)
+    .defaultFocus(true)
+    .onKeyEvent((event: KeyEvent) => {
+      if (event.type === KeyType.Down && event.keyCode === 2070 /* KEYCODE_ESCAPE */) {
+        router.back()
+      }
+    })
   }
   
   /**

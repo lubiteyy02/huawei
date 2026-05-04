@@ -58,16 +58,18 @@ struct UserCenterPage {
         if (this.isLoggedIn && this.currentUser) {
           // 已登录
           Column({ space: 12 }) {
-            // 头像
-            Text(this.currentUser.nickname?.charAt(0) || '用')
-              .fontSize(40)
-              .fontColor('#FFFFFF')
-              .width(80)
-              .height(80)
-              .borderRadius(40)
-              .backgroundColor('#4A90E2')
-              .textAlign(TextAlign.Center)
-              .lineHeight(80)
+            // 头像（用 Stack 包 Text，让首字母真正居中；
+            // 单纯 textAlign+lineHeight 在不同字体/baseline 下会偏下，Stack 居中最稳）
+            Stack({ alignContent: Alignment.Center }) {
+              Text(this.currentUser.nickname?.charAt(0) || '用')
+                .fontSize(40)
+                .fontColor('#FFFFFF')
+                .fontWeight(FontWeight.Medium)
+            }
+            .width(80)
+            .height(80)
+            .borderRadius(40)
+            .backgroundColor('#4A90E2')
             
             // 昵称
             Text(this.currentUser.nickname || '用户')
@@ -80,6 +82,8 @@ struct UserCenterPage {
               .fontSize(14)
               .fontColor('#999999')
           }
+          .width('100%')
+          .alignItems(HorizontalAlign.Center)
           .padding({ top: 40, bottom: 40 })
         } else {
           // 未登录
@@ -111,6 +115,8 @@ struct UserCenterPage {
                 })
             }
           }
+          .width('100%')
+          .alignItems(HorizontalAlign.Center)
           .padding({ top: 40, bottom: 40 })
         }
       }
@@ -157,6 +163,15 @@ struct UserCenterPage {
     .width('100%')
     .height('100%')
     .backgroundColor('#000000')
+    // 让根容器获得键盘焦点，否则 onKeyEvent 收不到事件
+    .focusable(true)
+    .defaultFocus(true)
+    // ESC 返回上一页（模拟器调试用；真机有手势返回，PC 调试更方便）
+    .onKeyEvent((event: KeyEvent) => {
+      if (event.type === KeyType.Down && event.keyCode === 2070 /* KEYCODE_ESCAPE */) {
+        router.back({ url: 'pages/Index' })
+      }
+    })
   }
   
   @Builder
