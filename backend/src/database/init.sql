@@ -1,3 +1,55 @@
+-- ============================================================
+-- 业务表（users / favorites / navigation_history）
+-- 使用 IF NOT EXISTS：已有数据保留，首次建库自动创建
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS users (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  phone VARCHAR(20) NOT NULL UNIQUE,
+  password VARCHAR(255) NOT NULL,
+  nickname VARCHAR(64) NOT NULL,
+  avatar VARCHAR(512) DEFAULT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_users_phone (phone)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS favorites (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  name VARCHAR(128) NOT NULL,
+  address VARCHAR(255) NOT NULL,
+  latitude DOUBLE NOT NULL,
+  longitude DOUBLE NOT NULL,
+  category VARCHAR(32) NOT NULL DEFAULT 'custom',
+  icon VARCHAR(255) DEFAULT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_favorites_user (user_id),
+  INDEX idx_favorites_user_coord (user_id, latitude, longitude)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS navigation_history (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  start_name VARCHAR(128) NOT NULL,
+  start_address VARCHAR(255) NOT NULL,
+  start_lat DOUBLE NOT NULL,
+  start_lng DOUBLE NOT NULL,
+  end_name VARCHAR(128) NOT NULL,
+  end_address VARCHAR(255) NOT NULL,
+  end_lat DOUBLE NOT NULL,
+  end_lng DOUBLE NOT NULL,
+  distance INT NOT NULL DEFAULT 0,
+  duration INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_nav_history_user (user_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================================
+-- 协同模块表：每次初始化重建，只是演示数据
+-- ============================================================
+
 SET FOREIGN_KEY_CHECKS = 0;
 
 DROP TABLE IF EXISTS collaboration_sync_logs;
@@ -76,38 +128,12 @@ CREATE TABLE collaboration_sync_logs (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-INSERT INTO collaboration_overview (id, phone_name, car_name, sync_status, last_sync_time, unread_messages, contact_count, music_count, continuation_count, logs_json)
-VALUES (
-  1,
-  'Harmony Phone',
-  'Harmony Car',
-  '已连接',
-  NOW(),
-  3,
-  128,
-  56,
-  2,
-  '["联系人：已同步 128 条","短信：已同步最近 20 条会话","音乐：已续接播放《七里香》","应用续接：导航任务已同步到车机"]'
-);
-
-INSERT INTO collaboration_contacts (id, name, phone, tag) VALUES
-(1, '李明', '138-0000-0001', '常用'),
-(2, '王婷', '138-0000-0002', '最近'),
-(3, '张伟', '138-0000-0003', '收藏');
-
-INSERT INTO collaboration_message_threads (id, name, preview, time_text, unread) VALUES
-(1, '妈妈', '路上注意安全，到家告诉我', '09:12', 1),
-(2, '同事-小周', '会议资料已经发到群里了', '08:40', 0),
-(3, '物业', '明天早上停水，请提前储水', '昨天', 2);
-
+-- 协同模块大部分表不写种子数据，由用户真实操作产生。
+-- 唯一例外：collaboration_music_library 写入 3 首本地真实可播放音乐
+-- （对应 entry/src/main/resources/rawfile/sample_music_*.mp3，
+--  与 RealAudioPlayerService.TRACK_TABLE 中的 id/title/artist 完全一致），
+-- 这是项目自带的资源，不是假数据。
 INSERT INTO collaboration_music_library (id, title, artist, progress, device) VALUES
-(1, '七里香', '周杰伦', 64, '手机正在播放'),
-(2, '稻香', '周杰伦', 22, '车机可续接'),
-(3, '晴天', '周杰伦', 89, '最近播放');
-
-INSERT INTO collaboration_music_state (song_id, playing, position, updated_at, source_device)
-VALUES (1, 1, 68000, NOW(), '手机');
-
-INSERT INTO collaboration_continuation_tasks (id, module_name, title, detail_text, device_name, completed) VALUES
-(1, '导航', '去公司', '已在手机上规划路线', '手机', 0),
-(2, '音乐', '七里香', '播放进度 01:08', '手机', 0);
+(1, '发如雪', '周杰伦', 0, '离线音乐'),
+(2, '听妈妈的话', '周杰伦', 0, '离线音乐'),
+(3, '以父之名', '周杰伦', 0, '离线音乐');

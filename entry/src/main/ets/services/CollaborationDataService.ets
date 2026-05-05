@@ -54,45 +54,23 @@ export interface CollaborationOverview {
   logs: string[];
 }
 
+// 兜底默认值：后端无数据 / 离线时使用，全部为空，避免显示假数据
 const defaultOverview: CollaborationOverview = {
-  phoneName: 'Harmony Phone',
-  carName: 'Harmony Car',
-  syncStatus: '已连接',
-  lastSyncTime: '刚刚',
-  unreadMessages: 3,
-  contactCount: 128,
-  musicCount: 56,
-  continuationCount: 2,
-  logs: [
-    '联系人：已同步 128 条',
-    '短信：已同步最近 20 条会话',
-    '音乐：已续接播放《七里香》',
-    '应用续接：导航任务已同步到车机'
-  ]
+  phoneName: '',
+  carName: '',
+  syncStatus: '连接中',
+  lastSyncTime: '',
+  unreadMessages: 0,
+  contactCount: 0,
+  musicCount: 0,
+  continuationCount: 0,
+  logs: []
 }
 
-const defaultContacts: CollaborationContact[] = [
-  { id: 1, name: '李明', phone: '138-0000-0001', tag: '常用' },
-  { id: 2, name: '王婷', phone: '138-0000-0002', tag: '最近' },
-  { id: 3, name: '张伟', phone: '138-0000-0003', tag: '收藏' }
-]
-
-const defaultThreads: CollaborationMessageThread[] = [
-  { id: 1, name: '妈妈', preview: '路上注意安全，到家告诉我', time: '09:12', unread: 1 },
-  { id: 2, name: '同事-小周', preview: '会议资料已经发到群里了', time: '08:40', unread: 0 },
-  { id: 3, name: '物业', preview: '明天早上停水，请提前储水', time: '昨天', unread: 2 }
-]
-
-const defaultMusic: CollaborationMusicItem[] = [
-  { id: 1, title: '七里香', artist: '周杰伦', progress: 64, device: '手机正在播放' },
-  { id: 2, title: '稻香', artist: '周杰伦', progress: 22, device: '车机可续接' },
-  { id: 3, title: '晴天', artist: '周杰伦', progress: 89, device: '最近播放' }
-]
-
-const defaultContinuation: CollaborationContinuationTask[] = [
-  { id: 1, module: '导航', title: '去公司', detail: '已在手机上规划路线', device: '手机' },
-  { id: 2, module: '音乐', title: '七里香', detail: '播放进度 01:08', device: '手机' }
-]
+const defaultContacts: CollaborationContact[] = []
+const defaultThreads: CollaborationMessageThread[] = []
+const defaultMusic: CollaborationMusicItem[] = []
+const defaultContinuation: CollaborationContinuationTask[] = []
 
 export class CollaborationDataService {
   private static instance: CollaborationDataService | null = null

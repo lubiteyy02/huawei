@@ -274,9 +274,10 @@ struct HistoryPage {
   
   /**
    * 再次导航
+   * router.back 弹回栈底原 Index，不会新建 Index 实例，地图 WebView 不重载。
+   * 原 Index 的 onPageShow 读 AppStorage → 切 Tab 1 → 推 destination → 规划路径。
    */
   navigateAgain(item: NavigationHistory) {
-    // 使用 AppStorage 传递导航目的地，确保首页能稳定接收到
     AppStorage.setOrCreate('shouldSwitchToNavigation', true)
     AppStorage.setOrCreate('navigationDestination', {
       name: item.endName,
@@ -286,7 +287,7 @@ struct HistoryPage {
     })
     AppStorage.setOrCreate('navTriggerVersion', Date.now())
 
-    router.replace({
+    router.back({
       url: 'pages/Index'
     })
   }

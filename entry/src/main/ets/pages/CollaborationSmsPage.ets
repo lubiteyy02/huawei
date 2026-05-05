@@ -19,8 +19,8 @@ struct CollaborationSmsPage {
   @State private errorMessage: string = '';
   @State private lastSyncHint: string = '等待同步事件';
   @State private isCar: boolean = false;
-  @State private composeName: string = '姈姈';
-  @State private composePreview: string = '路上注意安全';
+  @State private composeName: string = '';
+  @State private composePreview: string = '';
   @State private composing: boolean = false;
   @State private composeHint: string = '';
   @State private ttsHint: string = '';
@@ -41,8 +41,11 @@ struct CollaborationSmsPage {
       const name = typeof event.payload.name === 'string' ? event.payload.name : '';
       const preview = typeof event.payload.preview === 'string' ? event.payload.preview : '';
       void this.refreshMessages();
+      // 车机端收到来自手机端的新短信 → 实际调用 TTS 朗读
       if (this.isCar && !fromSelf && name !== '' && preview !== '') {
+        const text = `收到来自${name}的短信：${preview}`;
         this.ttsHint = `车机正在朗读：${name} · ${preview}`;
+        void this.tts.speak(text);
       }
       return;
     }
@@ -131,11 +134,8 @@ struct CollaborationSmsPage {
             Text(this.errorMessage)
               .fontSize(12)
               .fontColor('#F87171')
-          } else if (this.threads.length === 0) {
-            Text('暂无短信会话')
-              .fontSize(12)
-              .fontColor('rgba(255,255,255,0.6)')
           } else {
+            // 发送框/朗读提示框：与列表是否为空无关，只看设备角色
             if (!this.isCar) {
               Column({ space: 8 }) {
                 Text('手机端：模拟一条来信，推送到车机、车机会语音朗读')
@@ -191,24 +191,36 @@ struct CollaborationSmsPage {
               .backgroundColor('rgba(139,92,246,0.10)')
               .borderRadius(16)
             }
+
+            // 列表区
+            if (this.threads.length === 0) {
+              Text('暂无短信会话')
+                .fontSize(12)
+                .fontColor('rgba(255,255,255,0.6)')
+                .padding({ top: 12 })
+            }
             ForEach(this.threads, (thread: MessageThread) => {
               Column({ space: 6 }) {
                 Row() {
-                  Text(thread.name).fontSize(16).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
-                  Blank()
-                  Text(thread.time).fontSize(10).fontColor('rgba(255,255,255,0.5)')
-                }
-                Text(thread.preview)
-                  .fontSize(11)
-                  .fontColor('rgba(255,255,255,0.68)')
-                  .maxLines(2)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                Row() {
+                  Text(thread.name).fontSize(20).fontWeight(FontWeight.Bold).fontColor('#FFFFFF')
                   if (thread.unread > 0) {
                     Text(`未读 ${thread.unread}`)
-                      .fontSize(10)
+                      .fontSize(11)
                       .fontColor('#22C55E')
+                      .backgroundColor('rgba(34,197,94,0.15)')
+                      .borderRadius(10)
+                      .padding({ left: 10, right: 10, top: 3, bottom: 3 })
+                      .margin({ left: 10 })
                   }
+                  Blank()
+                  Text(thread.time).fontSize(12).fontColor('rgba(255,255,255,0.5)')
+                }
+                Text(thread.preview)
+                  .fontSize(15)
+                  .fontColor('rgba(255,255,255,0.85)')
+                  .maxLines(3)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                Row() {
                   Blank()
                   Button(thread.unread > 0 ? '标记已读' : '已读')
                     .fontSize(10)

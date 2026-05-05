@@ -73,6 +73,42 @@ enum TabType {
   RADIO = 1
 }
 
+/**
+ * 协同音乐同步用的状态总线（写入 AppStorage 'mediaNowPlaying'）
+ * - MediaModule 在 timeUpdate / stateChange 时实时写入；
+ * - CollaborationMusicPage 通过 @StorageProp 监听，实时显示当前正在播放的歌、进度、时长；
+ * - 不影响 MediaModule 自身播放器逻辑。
+ */
+export interface MediaSyncState {
+  songId: number;
+  title: string;
+  artist: string;
+  position: number;
+  duration: number;
+  playing: boolean;
+  updatedAt: number;
+}
+
+/**
+ * 外部传给 MediaModule 的播放控制指令
+ * - 通过 AppStorage 'mediaCommand' 写入，配合 'mediaCommandVersion' 自增触发 @Watch；
+ * - CollaborationMusicPage 提交续接申请时会发送 type='pause' 让手机端立即暂停，让出播放权。
+ */
+export interface MediaCommand {
+  type: string;
+}
+
+/**
+ * 外部续接请求：让 MediaModule 加载指定歌曲并跳到指定进度自动开始播放
+ * - 写 AppStorage 'mediaResumeRequest' + 'mediaTriggerVersion' 自增；
+ * - Index.ets 监听 mediaTriggerVersion → 切到娱乐 Tab；
+ * - MediaModule 监听 mediaTriggerVersion → 读 mediaResumeRequest 加载并 seek 后播放。
+ */
+export interface MediaResumeRequest {
+  songId: number;
+  position: number;
+}
+
 @Component
 export struct MediaModule {
   @Prop isPageVisible: boolean = true;
@@ -110,9 +146,15 @@ export struct MediaModule {
   @State failedRadioIds: Array<string> = [];
   @State @Watch('onActiveLyricChanged') activeLyricIndex: number = 0;
 
+  // ========== 协同音乐同步：状态总线 + 外部指令监听 ==========
+  // 由 CollaborationMusicPage 写入指令，本组件接收并执行
+  @StorageProp('mediaCommandVersion') @Watch('onExternalCommand') private mediaCommandVersion: number = 0;
+  @StorageProp('mediaTriggerVersion') @Watch('onExternalResumeRequest') private mediaTriggerVersion: number = 0;
+
   private avPlayer: media.AVPlayer | undefined;
   private pendingAutoplay: boolean = false;
   private rotateTimer: number = -1;
+  private lastSyncWriteAt: number = 0;
   private cacheService: CacheService = CacheService.getInstance();
   private rawFileDescriptors: Map<string, media.AVFileDescriptor | null> = new Map();
   private lyricScroller: ListScroller = new ListScroller();
@@ -121,10 +163,8 @@ export struct MediaModule {
 
   private onActiveLyricChanged() {
     try {
-      // 让当前播放的歌词行平滑滚动到列表中央
       this.lyricScroller.scrollToIndex(this.activeLyricIndex, true, ScrollAlign.CENTER);
-    } catch (err) {
-      // 列表尚未渲染或索引越界时忽略
+    } catch (_) {
     }
   }
 
@@ -141,12 +181,120 @@ export struct MediaModule {
     }
     return idx;
   }
+
+  // ========== 协同音乐同步辅助 ==========
+  /**
+   * 把当前播放状态写到 AppStorage 'mediaNowPlaying'，
+   * 供 CollaborationMusicPage 通过 @StorageProp 实时显示。
+   * 仅同步音乐曲目，电台不参与续接。
+   */
+  private writeMediaSyncState(): void {
+    if (!this.currentItem) {
+      AppStorage.setOrCreate<MediaSyncState | null>('mediaNowPlaying', null);
+      return;
+    }
+    if ((this.currentItem.mediaType as string) === 'radio') return;
+    const state: MediaSyncState = {
+      songId: this.currentItem.id,
+      title: this.currentItem.title,
+      artist: this.currentItem.artist,
+      position: this.currentTime,
+      duration: this.totalTime,
+      playing: this.isPlaying,
+      updatedAt: Date.now()
+    };
+    AppStorage.setOrCreate<MediaSyncState>('mediaNowPlaying', state);
+  }
+
+  /**
+   * 收到外部播放控制指令（CollaborationMusicPage 提交续接申请时会发 'pause'）
+   */
+  private onExternalCommand(): void {
+    const cmd = AppStorage.get<MediaCommand>('mediaCommand');
+    if (!cmd || !this.avPlayer) return;
+    if (cmd.type === 'pause' && this.isPlaying) {
+      this.avPlayer.pause().catch((e: Object) => console.warn('[MediaModule] external pause fail', JSON.stringify(e)));
+    } else if (cmd.type === 'resume' && !this.isPlaying && this.currentItem) {
+      this.avPlayer.play().catch((e: Object) => console.warn('[MediaModule] external resume fail', JSON.stringify(e)));
+    }
+  }
+
+  /**
+   * 收到外部续接请求（车机端 CollaborationMusicPage 点击「立即续接」时写入）
+   * - 找到对应 LocalMediaItem
+   * - loadItem 自动加载音频并 prepare
+   * - prepared 后立即 seek 到指定进度并 play
+   */
+  private onExternalResumeRequest(): void {
+    const req = AppStorage.get<MediaResumeRequest>('mediaResumeRequest');
+    if (!req || !req.songId) return;
+    AppStorage.setOrCreate<MediaResumeRequest | null>('mediaResumeRequest', null);
+    const target = this.musicItems.find((m) => m.id === req.songId);
+    if (!target) return;
+    this.activeTab = TabType.MUSIC;
+    void this.loadItemAndSeek(target, req.position);
+  }
+
+  /**
+   * 加载并跳到指定进度自动播放（车机端续接落地）
+   * - 通过短轮询等待播放器进入 prepared 状态（totalTime > 0）
+   * - 等同名 .lrc 加载（loadItem 内是 fire-and-forget，这里显式 await，
+   *   保证 seek 后立刻能算出正确的 activeLyricIndex 让现有 @Watch 滚动到位）
+   * - 然后 seek + play，并主动对齐 currentTime / activeLyricIndex，
+   *   保留原有「正在播放行高亮 + 自动居中滚动」的所有视觉效果
+   */
+  private async loadItemAndSeek(item: LocalMediaItem, positionMs: number): Promise<void> {
+    await this.loadItem(item, true);
+    // seek 前先把歌词准备好
+    if (!this.lrcCache.has(item.id)) {
+      try { await this.loadLyricsForItem(item); } catch (_) {}
+    }
+    for (let i = 0; i < 30; i++) {
+      if (this.totalTime > 0 && this.avPlayer) {
+        this.isSeeking = true;
+        try { await this.avPlayer.seek(positionMs); } catch (_) {}
+        try { await this.avPlayer.play(); } catch (_) {}
+        this.isPlaying = true;
+        this.currentTime = positionMs;
+        const idx = this.computeActiveLyricIndex(positionMs);
+        if (idx !== this.activeLyricIndex) {
+          this.activeLyricIndex = idx;
+        }
+        this.retryScrollLyric(0);
+        this.writeMediaSyncState();
+        setTimeout((): void => {
+          this.isSeeking = false;
+        }, 600);
+        return;
+      }
+      await new Promise<void>((r) => setTimeout(() => r(), 100));
+    }
+  }
+
+  /**
+   * 续接落地后多次尝试把歌词列表滚动到当前行
+   * - 第 1 次立刻调用（如果 List 已就绪可立即生效）
+   * - 后续 150 / 350 / 700ms 各一次（覆盖 Tab 切换 + List 首帧渲染各种延迟场景）
+   * - 失败时静默忽略；最终一次成功即可
+   */
+  private retryScrollLyric(attempt: number): void {
+    const delays: number[] = [0, 150, 350, 700, 1200];
+    if (attempt >= delays.length) return;
+    setTimeout((): void => {
+      const idx = this.activeLyricIndex;
+      try {
+        this.lyricScroller.scrollToIndex(idx, true, ScrollAlign.CENTER);
+      } catch (_) {}
+      this.retryScrollLyric(attempt + 1);
+    }, delays[attempt]);
+  }
+
   private readonly defaultCover: string = 'https://images.pexels.com/photos/16767318/pexels-photo-16767318.jpeg?auto=compress&cs=tinysrgb&w=600';
 
   private readonly musicItems: LocalMediaItem[] = [
-    new LocalMediaItem(1, '发如雪', '本地缓存', 'https://images.pexels.com/photos/1389429/pexels-photo-1389429.jpeg?auto=compress&cs=tinysrgb&w=600', 'rawfile:sample_music_1.mp3', '离线音乐', 'music'),
-    new LocalMediaItem(2, '听妈妈的话', '本地缓存', 'https://images.pexels.com/photos/167092/pexels-photo-167092.jpeg?auto=compress&cs=tinysrgb&w=600', 'rawfile:sample_music_2.mp3', '离线音乐', 'music'),
-    new LocalMediaItem(3, '以父之名', '本地缓存', 'https://images.pexels.com/photos/167092/pexels-photo-167092.jpeg?auto=compress&cs=tinysrgb&w=600', 'rawfile:sample_music_3.mp3', '离线音乐', 'music')
+    new LocalMediaItem(1, '发如雪', '周杰伦', 'https://images.pexels.com/photos/1389429/pexels-photo-1389429.jpeg?auto=compress&cs=tinysrgb&w=600', 'rawfile:sample_music_1.mp3', '离线音乐', 'music'),
+    new LocalMediaItem(2, '听妈妈的话', '周杰伦', 'https://images.pexels.com/photos/167092/pexels-photo-167092.jpeg?auto=compress&cs=tinysrgb&w=600', 'rawfile:sample_music_2.mp3', '离线音乐', 'music'),
+    new LocalMediaItem(3, '以父之名', '周杰伦', 'https://images.pexels.com/photos/167092/pexels-photo-167092.jpeg?auto=compress&cs=tinysrgb&w=600', 'rawfile:sample_music_3.mp3', '离线音乐', 'music')
   ];
 
   // 必须用 @State，否则 loadRadioStations() 异步赋值后 UI 不会重渲染。
@@ -399,11 +547,13 @@ export struct MediaModule {
             this.statusText = '正在播放';
           }
           this.startAnimations();
+          this.writeMediaSyncState();
         } else if (state === 'paused') {
           this.isPlaying = false;
           this.radioIsPlaying = false;
           this.statusText = '已暂停';
           this.stopAnimations();
+          this.writeMediaSyncState();
         } else if (state === 'completed') {
           if (!this.currentItem || (this.currentItem.mediaType as string) !== 'radio') {
             void this.playNext();
@@ -415,15 +565,18 @@ export struct MediaModule {
     });
 
     this.avPlayer.on('timeUpdate', (time: number) => {
-      if (this.isSeeking) {
-        return;
-      }
+      if (this.isSeeking) return;
       this.currentTime = time;
       this.progress = this.totalTime > 0 ? Math.min(100, (time / this.totalTime) * 100) : 0;
-      // 计算当前应高亮的歌词行；变化时 @Watch 触发滚动
       const idx = this.computeActiveLyricIndex(time);
       if (idx !== this.activeLyricIndex) {
         this.activeLyricIndex = idx;
+      }
+      // 协同音乐同步：节流写 AppStorage（每 ~500ms 一次足够 UI 流畅显示）
+      const now = Date.now();
+      if (now - this.lastSyncWriteAt > 500) {
+        this.lastSyncWriteAt = now;
+        this.writeMediaSyncState();
       }
     });
 

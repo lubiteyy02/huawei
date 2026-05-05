@@ -133,9 +133,12 @@ export struct EnhancedNavigationModule {
   }
   
   /**
-   * 地图加载完成
+   * 地图真正就绪（AMap JS 初始化完成）
+   * 由 HTML 里 initMap() 后 console.log('[MAP_READY]') 触发，ArkTS 通过 onConsole 捕获
+   * 事件驱动→取代原来的 setTimeout 150ms 盲等，消除首屏空白
    */
-  onMapLoad() {
+  private onMapReady(): void {
+    if (this.isMapLoaded) return;
     this.isMapLoaded = true;
     this.mapService.setWebController(this.webController);
 
@@ -144,34 +147,35 @@ export struct EnhancedNavigationModule {
       longitude: this.longitude
     };
     this.mapService.moveToLocation(defaultLocation, this.zoomLevel);
+    this.mapService.addCurrentLocationMarker(defaultLocation);
+    this.addressText = '默认位置(武汉)';
 
-    // 单次短延迟：等 WebView 初始化完成（150ms 通常足够，比之前 300+500ms 更快）
-    setTimeout(() => {
-      this.mapService.addCurrentLocationMarker(defaultLocation);
-      this.addressText = "默认位置(武汉)";
-      console.log('[Navigation] 地图初始化完成');
+    if (this.pendingDestination) {
+      const dest: Location = this.pendingDestination;
+      const name: string = this.pendingDestinationName;
+      this.pendingDestination = null;
+      this.pendingDestinationName = '';
+      this.startNavigation(dest, name);
+    }
+  }
 
-      // 若有手机端/收藏页推送的待启动目的地，立即开始导航
-      if (this.pendingDestination) {
-        const dest: Location = this.pendingDestination;
-        const name: string = this.pendingDestinationName;
-        this.pendingDestination = null;
-        this.pendingDestinationName = '';
-        this.startNavigation(dest, name);
-      }
-    }, 150);
+  /**
+   * HTML 加载完成 → 托底启动：800ms 内没收到 [MAP_READY] 就强制就绪
+   */
+  onMapLoad() {
+    setTimeout(() => { this.onMapReady(); }, 800);
   }
   
   /**
-   * 缩放地图
+   * 缩放地图：走 AMap 原生 zoomIn/zoomOut（内置 easing），比手动 setZoom 顺
    */
   changeZoom(delta: number): void {
     if (!this.webController) return;
     this.zoomLevel = Math.max(3, Math.min(20, this.zoomLevel + delta));
     try {
       const message = JSON.stringify({
-        action: 'setZoom',
-        zoom: this.zoomLevel
+        action: 'zoomBy',
+        direction: delta > 0 ? 'in' : 'out'
       });
       this.webController.runJavaScript(`window.postMessage('${message}', '*')`);
     } catch(e) {
@@ -330,9 +334,18 @@ export struct EnhancedNavigationModule {
   async loadSearchHistory() {
     try {
       const response = await this.historyService.getHistory();
-      // 提取最近5条搜索记录的目的地名称
       if (response.data && response.data.list) {
-        this.searchHistory = response.data.list.slice(0, 5).map(item => item.endName);
+        // 按 endName 去重（保持最近一次出现的顺序），取前 5 条
+        const seen = new Set<string>();
+        const unique: string[] = [];
+        for (const item of response.data.list) {
+          const name = item.endName;
+          if (!name || seen.has(name)) continue;
+          seen.add(name);
+          unique.push(name);
+          if (unique.length >= 5) break;
+        }
+        this.searchHistory = unique;
       } else {
         this.searchHistory = [];
       }
@@ -378,23 +391,29 @@ export struct EnhancedNavigationModule {
         Web({ src: $rawfile('amap.html'), controller: this.webController })
           .width('100%')
           .height('100%')
+          .domStorageAccess(true)
+          .cacheMode(CacheMode.Default)
+          .zoomAccess(false)
+          .horizontalScrollBarAccess(false)
+          .verticalScrollBarAccess(false)
           .onPageEnd(() => {
-            console.log('地图页面加载完成');
             this.onMapLoad();
           })
           .onErrorReceive((event) => {
             console.error('地图加载错误:', event?.error);
           })
           .onConsole((event) => {
-            // 转发WebView的console日志到ArkTS
-            if (event && event.message) {
-              const msg = event.message;
-              const message = msg.getMessage();
-              const sourceId = msg.getSourceId();
-              const lineNumber = msg.getLineNumber();
-              
-              // 输出WebView日志，包含来源信息
-              console.log('[WebView]', message, 'at', sourceId, ':', lineNumber);
+            // 性能关键：只处理 [MAP_READY] 信号和 error 级别日志
+            // AMap 在拖动/缩放时会产生大量 info 日志，全量转发 IPC 会把主线程压垄
+            if (!event || !event.message) return false;
+            const msg = event.message;
+            const text = msg.getMessage();
+            if (text && text.indexOf('[MAP_READY]') !== -1) {
+              this.onMapReady();
+              return true;
+            }
+            if (msg.getMessageLevel() >= 3) {
+              console.error('[WebView]', text);
             }
             return false;
           })

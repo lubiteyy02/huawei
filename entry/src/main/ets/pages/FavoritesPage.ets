@@ -212,13 +212,11 @@ struct FavoritesPage {
   
   /**
    * 导航到地点
+   * 使用 router.back({ url: 'pages/Index' }) 直接弹回栈底原 Index，
+   * 避免 router.replace 新建 Index 实例导致 WebView 重新加载地图。
+   * 原 Index 的 onPageShow 会读取 AppStorage，同步切 Tab + 触发规划。
    */
   navigateToPlace(item: FavoritePlace) {
-    console.log('[FavoritesPage] ========== 开始导航流程 ==========');
-    console.log('[FavoritesPage] 导航到:', item.name);
-    console.log('[FavoritesPage] 坐标:', item.latitude, item.longitude);
-    
-    // 统一使用 AppStorage 传递导航目的地，保证首页和导航模块都能稳定感知变化
     AppStorage.setOrCreate('shouldSwitchToNavigation', true);
     AppStorage.setOrCreate('navigationDestination', {
       name: item.name,
@@ -227,9 +225,8 @@ struct FavoritesPage {
       longitude: item.longitude
     });
     AppStorage.setOrCreate('navTriggerVersion', Date.now());
-    console.log('[FavoritesPage] 已写入 AppStorage 导航目的地');
-    
-    router.replace({
+
+    router.back({
       url: 'pages/Index'
     });
     console.log('[FavoritesPage] ========== 已跳转到首页 ==========');

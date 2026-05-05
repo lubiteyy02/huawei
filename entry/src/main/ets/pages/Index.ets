@@ -26,6 +26,9 @@ struct Index {
   @State navigationDestination: FavoritePlace | null = null
   // 事件式触发：业务方更新 navigationDestination 后将 navTriggerVersion 自增，本组件通过 @Watch 立即响应，避免 100ms 轮询
   @StorageProp('navTriggerVersion') @Watch('onNavTrigger') private navTriggerVersion: number = 0
+  // 音乐续接：CollaborationMusicPage 写入 mediaResumeRequest + 自增 mediaTriggerVersion 后，
+  // 本组件立即切到娱乐 Tab；MediaModule 自身也监听同一 key 来响应 load+seek+play。
+  @StorageProp('mediaTriggerVersion') @Watch('onMediaResumeTrigger') private mediaTriggerVersion: number = 0
 
   // === 坐标系统 ===
   @State ballX: number = 0
@@ -86,6 +89,21 @@ struct Index {
    */
   onNavTrigger() {
     this.checkNavigationDestination();
+  }
+
+  /**
+   * 音乐续接：mediaTriggerVersion 变化时立即切到娱乐 Tab（index=2）。
+   * 真正的 load+seek+play 由 MediaModule 自身的 @StorageProp 监听响应。
+   */
+  onMediaResumeTrigger() {
+    if (this.currentIndex !== 2) {
+      this.currentIndex = 2;
+      try {
+        this.controller.changeIndex(2);
+      } catch (err) {
+        console.warn('[Index] changeIndex(2) failed', JSON.stringify(err));
+      }
+    }
   }
   
   onPageShow() {

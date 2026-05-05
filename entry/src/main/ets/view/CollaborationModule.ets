@@ -13,27 +13,21 @@ interface DeviceStatusCard {
 interface CollaborationEntry {
   id: string;
   title: string;
-  subtitle: string;
   actionLabel: string;
   status: string;
 }
 
 @Component
 export struct CollaborationModule {
-  @State phoneName: string = 'Harmony Phone';
-  @State carName: string = 'Harmony Car';
-  @State syncStatus: string = '已连接';
-  @State lastSyncTime: string = '刚刚';
-  @State unreadMessages: number = 3;
-  @State contactCount: number = 128;
-  @State musicCount: number = 56;
-  @State continuationCount: number = 2;
-  @State logs: string[] = [
-    '联系人：已同步 128 条',
-    '短信：已同步最近 20 条会话',
-    '音乐：已续接播放《七里香》',
-    '应用续接：导航任务已同步到车机'
-  ];
+  @State phoneName: string = '';
+  @State carName: string = '';
+  @State syncStatus: string = '连接中';
+  @State lastSyncTime: string = '';
+  @State unreadMessages: number = 0;
+  @State contactCount: number = 0;
+  @State musicCount: number = 0;
+  @State continuationCount: number = 0;
+  @State logs: string[] = [];
   @State loading: boolean = false;
   @State errorMessage: string = '';
   @State syncHint: string = '等待同步事件';
@@ -76,16 +70,16 @@ export struct CollaborationModule {
   };
 
   private readonly deviceCards: DeviceStatusCard[] = [
-    { title: '手机', value: 'Harmony Phone', detail: '主设备 · 正在同步' },
-    { title: '车机', value: 'Harmony Car', detail: '协同终端 · 在线' },
-    { title: '状态', value: '已连接', detail: '最后同步：刚刚' }
+    { title: '手机', value: '未连接', detail: '主设备' },
+    { title: '车机', value: '未连接', detail: '协同终端' },
+    { title: '状态', value: '连接中', detail: '等待同步' }
   ];
 
   private readonly featureEntries: CollaborationEntry[] = [
-    { id: 'contacts', title: '联系人同步', subtitle: '最近联系人 / 常用联系人 / 快速拨号', actionLabel: '进入联系人', status: '128 条联系人' },
-    { id: 'sms', title: '短信同步', subtitle: '会话摘要 / 未读提醒 / 语音播报', actionLabel: '进入短信', status: '3 条未读' },
-    { id: 'music', title: '音乐同步', subtitle: '播放列表 / 收藏 / 续接播放', actionLabel: '进入音乐', status: '56 首歌曲' },
-    { id: 'resume', title: '应用续接', subtitle: '页面状态 / 播放进度 / 任务恢复', actionLabel: '进入续接', status: '2 个可续接任务' }
+    { id: 'contacts', title: '联系人同步', actionLabel: '进入联系人', status: '' },
+    { id: 'sms', title: '短信同步', actionLabel: '进入短信', status: '' },
+    { id: 'music', title: '音乐同步', actionLabel: '进入音乐', status: '' },
+    { id: 'resume', title: '导航续接', actionLabel: '进入导航续接', status: '' }
   ];
 
   // 数据由 CollaborationDataService 提供，避免假数据硬编码在页面中
@@ -127,7 +121,15 @@ export struct CollaborationModule {
     this.errorMessage = errorMessage;
   }
 
+  /**
+   * 设备角色检测：
+   * 1. 优先读 AppStorage 'collab.role'（用户手动切换写入的）
+   * 2. 否则按 deviceInfo.deviceType 自动判定（tablet/car/2in1 → 车机）
+   * 这样在两台手机模拟器上演示时也能手动切换角色，不再被 deviceType 限制。
+   */
   private detectRole(): string {
+    const forced = AppStorage.get<string>('collab.role') ?? '';
+    if (forced === 'car' || forced === 'phone') return forced;
     let type = '';
     try {
       type = deviceInfo.deviceType ?? '';
@@ -148,6 +150,17 @@ export struct CollaborationModule {
     backendConfig.deviceId = role === 'car' ? 'car-001' : 'phone-001';
     backendConfig.userId = '10001';
     this.viewModel.configureBackend(backendConfig);
+  }
+
+  /**
+   * 手动切换角色：写入 AppStorage 并重新连接 WebSocket。
+   * GlobalAnnouncerService 在 viewModel.getDeviceId() 上判断车机，重连后立即生效。
+   */
+  private toggleRole(): void {
+    const next = this.deviceRole === 'car' ? 'phone' : 'car';
+    AppStorage.setOrCreate('collab.role', next);
+    this.initSyncConfig();
+    this.syncHint = `已切换为${next === 'car' ? '车机' : '手机'}端 · ${this.formatTimeText()}`;
   }
 
   private async refreshOverview(): Promise<void> {
@@ -257,6 +270,14 @@ export struct CollaborationModule {
           Text(`本机：${this.deviceRole === 'car' ? '车机端' : '手机端'}`)
             .fontSize(10)
             .fontColor('#A78BFA')
+          Button(`切换为${this.deviceRole === 'car' ? '手机' : '车机'}端`)
+            .fontSize(10)
+            .fontWeight(FontWeight.Medium)
+            .backgroundColor('rgba(139,92,246,0.3)')
+            .fontColor('#FFFFFF')
+            .borderRadius(10)
+            .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+            .onClick(() => this.toggleRole())
           Text(`最后同步 ${this.lastSyncTime}`)
             .fontSize(10)
             .fontColor('rgba(255,255,255,0.55)')
@@ -333,11 +354,6 @@ export struct CollaborationModule {
                         .fontSize(16)
                         .fontWeight(FontWeight.Bold)
                         .fontColor('#FFFFFF')
-                      Text(entry.subtitle)
-                        .fontSize(11)
-                        .fontColor('rgba(255,255,255,0.58)')
-                        .maxLines(2)
-                        .textOverflow({ overflow: TextOverflow.Ellipsis })
                       Text(entry.status)
                         .fontSize(10)
                         .fontColor('#A78BFA')

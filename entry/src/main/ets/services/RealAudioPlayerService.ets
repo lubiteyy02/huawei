@@ -22,9 +22,9 @@ interface TrackMeta {
 }
 
 const TRACK_TABLE: TrackMeta[] = [
-  { id: 1, title: '夜曲', artist: '周杰伦', rawfile: 'sample_music_1.mp3' },
-  { id: 2, title: '稻香', artist: '周杰伦', rawfile: 'sample_music_2.mp3' },
-  { id: 3, title: '晴天', artist: '周杰伦', rawfile: 'sample_music_3.mp3' }
+  { id: 1, title: '发如雪', artist: '周杰伦', rawfile: 'sample_music_1.mp3' },
+  { id: 2, title: '听妈妈的话', artist: '周杰伦', rawfile: 'sample_music_2.mp3' },
+  { id: 3, title: '以父之名', artist: '周杰伦', rawfile: 'sample_music_3.mp3' }
 ]
 
 export class RealAudioPlayerService {

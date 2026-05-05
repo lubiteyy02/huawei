@@ -13,10 +13,34 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
+            /* 关键：让地图容器独占触摸手势，避免 ArkWeb 父容器争抢拖动 */
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
+            overscroll-behavior: none;
         }
         #container {
             width: 100%;
             height: 100%;
+            /* 注意：这里不要加 transform/will-change 提升整个容器到 GPU 合成层。
+               AMap 2.0 内部有瓦片层、polyline canvas 层、marker DOM 层，各自会
+               按需独立提升。若外层强制合成，拖动时子图层更新会被推迟一帧，
+               出现"折线在瓦片上漂移"的视觉错位。 */
+        }
+        /* 当前位置标记：带脉冲动画的小蓝点 */
+        .loc-dot {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #007AFF;
+            border: 3px solid #fff;
+            box-shadow: 0 0 0 0 rgba(0, 122, 255, 0.5);
+            animation: loc-pulse 1.8s ease-out infinite;
+        }
+        @keyframes loc-pulse {
+            0%   { box-shadow: 0 0 0 0    rgba(0,122,255,0.55); }
+            70%  { box-shadow: 0 0 0 14px rgba(0,122,255,0);    }
+            100% { box-shadow: 0 0 0 0    rgba(0,122,255,0);    }
         }
     </style>
     <script src="https://webapi.amap.com/maps?v=2.0&key=2455309b8d8bb76cfdfebccb98f20153"></script>
@@ -34,30 +58,53 @@
         let markers = [];
         let currentLocationMarker = null;
         
-        // 初始化地图 - 2D模式
+        // 初始化地图 - 3D viewMode 走 WebGL 统一渲染
+        // 2D 模式下瓦片与 overlay 分别用不同 DOM/canvas 转换，快速拖动两层会错位；
+        // 3D 模式瓦片+marker+polyline 全在同一个 WebGL 画布，由 GPU 一次性变换，绝对同步。
         function initMap() {
             map = new AMap.Map('container', {
                 zoom: 15,
                 center: [114.309994670642, 30.486874173982763],
                 mapStyle: 'amap://styles/normal',
                 showLabel: true,
-                features: ['bg', 'road', 'building', 'point']
+                features: ['bg', 'road', 'point'],
+                viewMode: '3D',
+                pitch: 0,          // 锁定俯视，视觉上仍是 2D
+                rotateEnable: false,
+                pitchEnable: false,
+                // animateEnable=false：禁用拖动时的插值平滑，
+                // 让瓦片与 WebGL overlay（polyline/marker）逐帧同步，消除拖动错位
+                animateEnable: false,
+                jogEnable: false
             });
             
-            console.log('地图初始化完成');
-            
+            console.log('[MAP_READY]');
+
+            // 拖动期间隐藏 polyline + 起终点圆点，松手立即恢复。
+            // 解决方案核心：AMap 拖动时 JS 主线程逐帧上传 overlay 顶点，
+            // 与瓦片的合成层 transform 之间存在 1 帧偏差，视觉上路径会"漂"。
+            // 隐藏后这一帧偏差就看不见了；松手时一次性显示在正确位置。
+            map.on('dragstart', () => {
+                if (currentPolyline) currentPolyline.hide();
+                for (const m of markers) { if (m && m.hide) m.hide(); }
+            });
+            map.on('dragend', () => {
+                if (currentPolyline) currentPolyline.show();
+                for (const m of markers) { if (m && m.show) m.show(); }
+            });
+
             if (window.mapController) {
                 window.mapController.postMessage('mapLoaded');
             }
         }
         
-        // 设置地图中心
+        // 设置地图中心（带 panTo 动画，比 setCenter 更顺）
         function setCenter(lng, lat, zoom) {
-            if (map) {
-                map.setCenter([lng, lat]);
-                if (zoom) {
-                    map.setZoom(zoom);
-                }
+            if (!map) return;
+            if (zoom) {
+                map.setZoomAndCenter(zoom, [lng, lat], false, 300);
+            } else {
+                map.panTo([lng, lat], 300);
             }
         }
         
@@ -71,59 +118,62 @@
                 return;
             }
             
-            console.log('绘制路线: 起点', path[0], '终点', path[path.length - 1]);
-            
-            // 创建路线
+            // 去掉 showDir 箭头纹理，缩放/拖动时重绘开销大幅降低
             currentPolyline = new AMap.Polyline({
                 path: path,
                 strokeColor: '#4A90E2',
-                strokeWeight: 6,
-                strokeOpacity: 0.8,
+                strokeWeight: 5,
+                strokeOpacity: 0.85,
                 lineJoin: 'round',
                 lineCap: 'round',
-                showDir: true,
-                dirColor: '#FFFFFF',
+                showDir: false,
                 zIndex: 50
             });
             
             map.add(currentPolyline);
             
-            // 添加起点标记
+            // 起/终点改用 CircleMarker（纯 WebGL，与 polyline 同一画布渲染）
+            // → 拖动时不会出现 DOM marker 与瓦片错位的「路径漂移」假象
             if (path.length > 0) {
-                const startMarker = new AMap.Marker({
-                    position: path[0],
-                    title: '起点',
-                    icon: new AMap.Icon({
-                        size: new AMap.Size(40, 50),
-                        image: 'https://webapi.amap.com/theme/v1.3/markers/n/start.png',
-                        imageSize: new AMap.Size(40, 50)
-                    }),
-                    offset: new AMap.Pixel(-20, -50),
-                    zIndex: 100,
-                    animation: 'AMAP_ANIMATION_DROP'
+                const startMarker = new AMap.CircleMarker({
+                    center: path[0],
+                    radius: 7,
+                    fillColor: '#22C55E',
+                    fillOpacity: 1,
+                    strokeColor: '#FFFFFF',
+                    strokeWeight: 3,
+                    zIndex: 100
                 });
                 map.add(startMarker);
                 markers.push(startMarker);
-                
-                // 添加终点标记
-                const endMarker = new AMap.Marker({
-                    position: path[path.length - 1],
-                    title: '终点',
-                    icon: new AMap.Icon({
-                        size: new AMap.Size(40, 50),
-                        image: 'https://webapi.amap.com/theme/v1.3/markers/n/end.png',
-                        imageSize: new AMap.Size(40, 50)
-                    }),
-                    offset: new AMap.Pixel(-20, -50),
-                    zIndex: 100,
-                    animation: 'AMAP_ANIMATION_DROP'
+
+                const endMarker = new AMap.CircleMarker({
+                    center: path[path.length - 1],
+                    radius: 7,
+                    fillColor: '#EF4444',
+                    fillOpacity: 1,
+                    strokeColor: '#FFFFFF',
+                    strokeWeight: 3,
+                    zIndex: 100
                 });
                 map.add(endMarker);
                 markers.push(endMarker);
             }
-            
-            // 自动调整视野
-            map.setFitView(null, false, [100, 100, 100, 100]);
+
+            // 视角切换：先用 setFitView immediately 拿到目标 zoom/center，
+            // 再回到原视图，最后通过 setZoomAndCenter 给一个 300ms 平滑动画过去。
+            // 这样比默认 setFitView 动画（约 1s）快 3 倍，又不会突兀。
+            const prevZoom = map.getZoom();
+            const prevCenter = map.getCenter();
+            map.setFitView(null, true, [80, 80, 80, 80], 16);
+            const targetZoom = map.getZoom();
+            const targetCenter = map.getCenter();
+            // 先无动画恢复原视图
+            map.setZoomAndCenter(prevZoom, [prevCenter.lng, prevCenter.lat], true);
+            // 下一帧执行 300ms 动画到目标视图（避免与上面的 immediate 调用合并）
+            requestAnimationFrame(() => {
+                map.setZoomAndCenter(targetZoom, [targetCenter.lng, targetCenter.lat], false, 300);
+            });
         }
         
         // 清除所有覆盖物
@@ -150,7 +200,7 @@
             return markers.length - 1;
         }
         
-        // 添加当前位置标记
+        // 添加当前位置标记（纯 CSS 脉冲动画，不依赖网络图片）
         function addCurrentLocationMarker(lng, lat) {
             if (currentLocationMarker) {
                 map.remove(currentLocationMarker);
@@ -159,28 +209,26 @@
             currentLocationMarker = new AMap.Marker({
                 position: [lng, lat],
                 title: '当前位置',
-                icon: new AMap.Icon({
-                    size: new AMap.Size(20, 20),
-                    image: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMTAiIGN5PSIxMCIgcj0iOCIgZmlsbD0iIzAwN0FGRiIgc3Ryb2tlPSIjRkZGRkZGIiBzdHJva2Utd2lkdGg9IjIiLz48L3N2Zz4=',
-                    imageSize: new AMap.Size(20, 20)
-                }),
-                offset: new AMap.Pixel(-10, -10),
+                content: '<div class="loc-dot"></div>',
+                offset: new AMap.Pixel(-9, -9),
                 zIndex: 200
             });
             
             map.add(currentLocationMarker);
         }
         
-        // 缩放地图
+        // 直接设置 zoom 级别（用于 setCenter 携带的 zoom）
         function setZoom(zoom) {
             if (map) {
-                map.setZoom(zoom);
+                map.setZoom(zoom, false, 200);
             }
         }
         
-        // 获取当前缩放级别
-        function getZoom() {
-            return map ? map.getZoom() : 15;
+        // 平滑的放大/缩小（比 setZoom(level) 体验更好，地图内置 easing）
+        function zoomBy(direction) {
+            if (!map) return;
+            if (direction === 'in') map.zoomIn();
+            else if (direction === 'out') map.zoomOut();
         }
         
         // 接收来自ArkTS的消息
@@ -193,7 +241,6 @@
                         setCenter(data.lng, data.lat, data.zoom);
                         break;
                     case 'drawRoute':
-                        console.log('执行drawRoute, 坐标点数:', data.path ? data.path.length : 0);
                         drawRoute(data.path);
                         break;
                     case 'clearOverlays':
@@ -208,8 +255,9 @@
                     case 'setZoom':
                         setZoom(data.zoom);
                         break;
-                    default:
-                        console.warn('未知的action:', data.action);
+                    case 'zoomBy':
+                        zoomBy(data.direction);
+                        break;
                 }
             } catch (e) {
                 console.error('WebView消息处理错误:', e);
