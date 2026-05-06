@@ -145,6 +145,13 @@ export struct MediaModule {
   @State tabPressOffset: number = 0;
   @State failedRadioIds: Array<string> = [];
   @State @Watch('onActiveLyricChanged') activeLyricIndex: number = 0;
+  // 「歌词卷帘」垂直偏移（负值为向上滚动）。
+  // 全量 Column 项放在 clip 容器里，通过 translateY 让 active 行始终居中。
+  // 不依赖 List/scrollToIndex，布局确定性计算，避开原架构的虚拟化/滚动 API 不一致问题。
+  @State lyricTranslateY: number = 0;
+  // lrcCache 是 private 非@State，异步加载完不会触发 ForEach 重渲。
+  // 这个版本号在 lrc 加载成功后自增，被 ForEach key 引用，强制 ArkUI 重新评估 getCurrentLyrics()。
+  @State lyricLoadedVersion: number = 0;
 
   // ========== 协同音乐同步：状态总线 + 外部指令监听 ==========
   // 由 CollaborationMusicPage 写入指令，本组件接收并执行
@@ -157,14 +164,66 @@ export struct MediaModule {
   private lastSyncWriteAt: number = 0;
   private cacheService: CacheService = CacheService.getInstance();
   private rawFileDescriptors: Map<string, media.AVFileDescriptor | null> = new Map();
-  private lyricScroller: ListScroller = new ListScroller();
   // 运行时从 rawfile/.lrc 加载的歌词缓存（按 item.id），优先级高于硬编码 lyricMap
   private lrcCache: Map<number, LyricLine[]> = new Map();
+  // 「next-line boost」：在两次 timeUpdate (~250ms) 间隔内提前准点跳下一行。
+  // 仅负责「快进 1 步」，不递归、不覆盖 timeUpdate 主逻辑。
+  private lyricBoostTimer: number = -1;
 
+  // 歌词卷帘几何常量：每行高度、可视区高度（px）。
+  // active 行中心 = LYRIC_CONTAINER_HEIGHT / 2
+  private readonly LYRIC_LINE_HEIGHT: number = 32;
+  private readonly LYRIC_CONTAINER_HEIGHT: number = 130;
+
+  /**
+   * activeLyricIndex 变化 → 动画平滑让当前行居中。
+   * QQ 音乐同步歌词的同一思路：整块卷帘 translateY，
+   * 不动 List/Scroll API。
+   */
   private onActiveLyricChanged() {
-    try {
-      this.lyricScroller.scrollToIndex(this.activeLyricIndex, true, ScrollAlign.CENTER);
-    } catch (_) {
+    this.updateLyricTranslate(true);
+  }
+
+  /**
+   * next-line boost：如果下一行歌词在 1 秒内到达，
+   * 设一个 setTimeout 在那个时刻准点把 activeLyricIndex 跳一次。
+   * - 只快进 1 步，不递归；下次 timeUpdate 会重新采样邨定。
+   * - 暂停/拖动/换歌 都会被 cancelLyricBoost 清掉。
+   */
+  private scheduleLyricBoost(currentMs: number): void {
+    this.cancelLyricBoost();
+    if (!this.isPlaying) return;
+    const lyrics = this.getCurrentLyrics();
+    const nextIdx = this.activeLyricIndex + 1;
+    if (nextIdx >= lyrics.length) return;
+    const delay = lyrics[nextIdx].time - currentMs;
+    if (delay <= 0 || delay > 1000) return; // 只处理距下行 <1s 的快途场景
+    this.lyricBoostTimer = setTimeout((): void => {
+      this.lyricBoostTimer = -1;
+      if (!this.isPlaying) return;
+      if (this.activeLyricIndex < nextIdx) {
+        this.activeLyricIndex = nextIdx;
+      }
+    }, delay);
+  }
+
+  private cancelLyricBoost(): void {
+    if (this.lyricBoostTimer !== -1) {
+      clearTimeout(this.lyricBoostTimer);
+      this.lyricBoostTimer = -1;
+    }
+  }
+
+  private updateLyricTranslate(animated: boolean): void {
+    const target = this.LYRIC_CONTAINER_HEIGHT / 2 - (this.activeLyricIndex + 0.5) * this.LYRIC_LINE_HEIGHT;
+    // 【临时调试】验证 activeLyricIndex 和 translateY 的实时值
+    console.info(`[MediaModule][SCROLL] idx=${this.activeLyricIndex} translateY=${target} animated=${animated}`);
+    if (animated) {
+      animateTo({ duration: 280, curve: Curve.EaseOut }, () => {
+        this.lyricTranslateY = target;
+      });
+    } else {
+      this.lyricTranslateY = target;
     }
   }
 
@@ -259,8 +318,11 @@ export struct MediaModule {
         const idx = this.computeActiveLyricIndex(positionMs);
         if (idx !== this.activeLyricIndex) {
           this.activeLyricIndex = idx;
+          // @Watch 会动画到位
+        } else {
+          // idx 未变但列表可能没滚过，手动触发一次
+          this.updateLyricTranslate(true);
         }
-        this.retryScrollLyric(0);
         this.writeMediaSyncState();
         setTimeout((): void => {
           this.isSeeking = false;
@@ -269,24 +331,6 @@ export struct MediaModule {
       }
       await new Promise<void>((r) => setTimeout(() => r(), 100));
     }
-  }
-
-  /**
-   * 续接落地后多次尝试把歌词列表滚动到当前行
-   * - 第 1 次立刻调用（如果 List 已就绪可立即生效）
-   * - 后续 150 / 350 / 700ms 各一次（覆盖 Tab 切换 + List 首帧渲染各种延迟场景）
-   * - 失败时静默忽略；最终一次成功即可
-   */
-  private retryScrollLyric(attempt: number): void {
-    const delays: number[] = [0, 150, 350, 700, 1200];
-    if (attempt >= delays.length) return;
-    setTimeout((): void => {
-      const idx = this.activeLyricIndex;
-      try {
-        this.lyricScroller.scrollToIndex(idx, true, ScrollAlign.CENTER);
-      } catch (_) {}
-      this.retryScrollLyric(attempt + 1);
-    }, delays[attempt]);
   }
 
   private readonly defaultCover: string = 'https://images.pexels.com/photos/16767318/pexels-photo-16767318.jpeg?auto=compress&cs=tinysrgb&w=600';
@@ -553,8 +597,10 @@ export struct MediaModule {
           this.radioIsPlaying = false;
           this.statusText = '已暂停';
           this.stopAnimations();
+          this.cancelLyricBoost();
           this.writeMediaSyncState();
         } else if (state === 'completed') {
+          this.cancelLyricBoost();
           if (!this.currentItem || (this.currentItem.mediaType as string) !== 'radio') {
             void this.playNext();
           }
@@ -572,6 +618,8 @@ export struct MediaModule {
       if (idx !== this.activeLyricIndex) {
         this.activeLyricIndex = idx;
       }
+      // 在 ~250ms 间隔内准点预点下一行，报锁到几十毫秒误差
+      this.scheduleLyricBoost(time);
       // 协同音乐同步：节流写 AppStorage（每 ~500ms 一次足够 UI 流畅显示）
       const now = Date.now();
       if (now - this.lastSyncWriteAt > 500) {
@@ -583,6 +631,7 @@ export struct MediaModule {
     this.avPlayer.on('error', () => {
       this.statusText = '播放失败，请检查资源';
       this.isPlaying = false;
+      this.cancelLyricBoost();
       this.stopAnimations();
     });
   }
@@ -693,10 +742,28 @@ export struct MediaModule {
       const parsed: LyricLine[] = this.parseLrc(text);
       if (parsed.length > 0) {
         this.lrcCache.set(item.id, parsed);
+        // 关键：通知 ArkUI 重渲。没有这一行，首次启动时 ForEach 会一直用 lyricMap 兑底，
+        // 却让 timeUpdate 走 lrc 计算 idx，导致严重错位。
+        this.lyricLoadedVersion = this.lyricLoadedVersion + 1;
+        // lrc 加载后重算一次 active 行（时间轴与 lyricMap 不同）以多一重保险
+        if (this.currentItem && this.currentItem.id === item.id) {
+          const idx = this.computeActiveLyricIndex(this.currentTime);
+          if (idx !== this.activeLyricIndex) {
+            this.activeLyricIndex = idx;
+          } else {
+            this.updateLyricTranslate(false);
+          }
+        }
+        // 【临时调试】验证用户提供的 .lrc 被正确加载 / 解析
+        const head: LyricLine = parsed[0];
+        const tail: LyricLine = parsed[parsed.length - 1];
+        console.info(`[MediaModule][LRC] LOADED ${lrcName} | itemId=${item.id} | lines=${parsed.length} | head=${head.time}ms "${head.text}" | tail=${tail.time}ms "${tail.text}"`);
+      } else {
+        console.warn(`[MediaModule][LRC] PARSED 0 LINES from ${lrcName}（文件存在但格式可能不对）`);
       }
     } catch (err) {
       // .lrc 文件不存在则使用 lyricMap 兜底，不打印为 error
-      console.info(`[MediaModule] no lrc for ${lrcName}, fallback to built-in lyrics`);
+      console.info(`[MediaModule][LRC] MISS ${lrcName}（回退 lyricMap）err=${JSON.stringify(err)}`);
     }
   }
 
@@ -748,6 +815,9 @@ export struct MediaModule {
       this.statusText = item.mediaType === 'radio' ? `电台：${item.title}（准备中）` : `本地缓存：${item.title}`;
       this.emptyHint = '';
       this.activeLyricIndex = 0;
+      this.cancelLyricBoost();
+      // 换歌时立刻重置歌词卷帘位置（无动画）
+      this.updateLyricTranslate(false);
       // 切换歌曲时尝试加载同名 .lrc，失败则回退硬编码
       void this.loadLyricsForItem(item);
 
@@ -1277,29 +1347,34 @@ export struct MediaModule {
                     .layoutWeight(1)
                     .width('100%')
                     .textAlign(TextAlign.Center)
-                }
-                List({ scroller: this.lyricScroller, space: 8 }) {
-                  ForEach(this.getCurrentLyrics(), (line: LyricLine, idx: number) => {
-                    ListItem() {
-                      Text(line.text)
-                        .fontSize(idx === this.activeLyricIndex ? 18 : 13)
-                        .fontWeight(idx === this.activeLyricIndex ? FontWeight.Bold : FontWeight.Normal)
-                        .fontColor(idx === this.activeLyricIndex ? '#FFFFFF' : 'rgba(255,255,255,0.42)')
-                        .backgroundColor(idx === this.activeLyricIndex ? 'rgba(56,189,248,0.22)' : 'transparent')
-                        .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-                        .borderRadius(10)
-                        .width('100%')
-                        .animation({ duration: 200 })
-                        .onClick(() => {
-                          void this.seekToLyric(line.time);
-                        })
+                } else {
+                  // 「歌词卷帘」架构：固定高度 + clip + Column 整块 translateY。
+                  // active 行在几何中心，lyricTranslateY 随 activeLyricIndex 联动动画。
+                  // 必须用 TopStart：让 Column 起点固定在 y=0，translateY 公式才正确。
+                  // 用 Center 会让 Stack 自动居中 Column，与我们的偏移叠加导致错位。
+                  Stack({ alignContent: Alignment.TopStart }) {
+                    Column() {
+                      ForEach(this.getCurrentLyrics(), (line: LyricLine, idx: number) => {
+                        Text(line.text)
+                          .fontSize(idx === this.activeLyricIndex ? 18 : 12)
+                          .fontWeight(idx === this.activeLyricIndex ? FontWeight.Bold : FontWeight.Normal)
+                          .fontColor(idx === this.activeLyricIndex ? '#38BDF8' : 'rgba(255,255,255,0.38)')
+                          .height(this.LYRIC_LINE_HEIGHT)
+                          .width('100%')
+                          .textAlign(TextAlign.Start)
+                          .maxLines(1)
+                          .textOverflow({ overflow: TextOverflow.Ellipsis })
+                          .onClick(() => { void this.seekToLyric(line.time); })
+                      }, (line: LyricLine, idx: number) => `${this.currentItem ? this.currentItem.id : 0}-${this.lyricLoadedVersion}-${idx}-${line.time}`)
                     }
-                  }, (line: LyricLine, idx: number) => `${this.currentItem ? this.currentItem.id : 0}-${idx}-${line.time}-${line.text}`)
+                    .width('100%')
+                    .alignItems(HorizontalAlign.Start)
+                    .translate({ y: this.lyricTranslateY })
+                  }
+                  .width('100%')
+                  .height(this.LYRIC_CONTAINER_HEIGHT)
+                  .clip(true)
                 }
-                .layoutWeight(1)
-                .width('100%')
-                .scrollBar(BarState.Off)
-                .edgeEffect(EdgeEffect.Spring)
               } else if (this.defaultCoverVisible && this.activeTab === TabType.MUSIC) {
                 // 音乐 Tab + 未选歌：黑胶右侧的引导文案 + 模拟音波
                 Text('多媒体娱乐')
@@ -1433,18 +1508,33 @@ export struct MediaModule {
                   .margin({ left: 8, right: 8 })
                   .trackColor('rgba(255,255,255,0.10)')
                   .selectedColor('#38BDF8')
-                  .onChange(async (value: number) => {
+                  .onChange(async (value: number, mode: SliderChangeMode) => {
+                    // 拖动期间（Moving）只更新 UI 反馈，不真正 seek，
+                    // 避免触发多次 avPlayer.seek 造成 isSeeking 竞态、@Watch
+                    // 反复 scrollToIndex 打架。
                     const clamped = Math.max(0, Math.min(100, value));
                     const target = this.totalTime > 0 ? Math.floor((clamped / 100) * this.totalTime) : 0;
-                    this.isSeeking = true;
                     this.progress = clamped;
                     this.currentTime = target;
+                    // 拖动中阻止 timeUpdate 把 currentTime/activeLyricIndex 拉回旧位置
+                    if (mode === SliderChangeMode.Begin || mode === SliderChangeMode.Moving) {
+                      this.isSeeking = true;
+                      return;
+                    }
+                    // End / Click：手指松开或单击，发起一次真正的 seek
                     try {
                       await this.avPlayer?.seek(target);
                     } catch (err) {
                       console.error('[MediaModule] seek failed:', JSON.stringify(err));
                     } finally {
                       this.isSeeking = false;
+                    }
+                    // 主动算一次 active 行 + 触发滚动，避免等下一次 timeUpdate（最多 250ms）
+                    const idx = this.computeActiveLyricIndex(target);
+                    if (idx !== this.activeLyricIndex) {
+                      this.activeLyricIndex = idx;
+                    } else {
+                      this.updateLyricTranslate(true);
                     }
                   })
                 Text(this.formatTime(this.totalTime))
