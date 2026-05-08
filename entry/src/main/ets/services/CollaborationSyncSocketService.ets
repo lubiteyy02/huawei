@@ -1,6 +1,6 @@
 import webSocket from '@ohos.net.webSocket'
 
-export type CollaborationSyncEventType = 'contact.updated' | 'message.read' | 'message.created' | 'music.stateChanged' | 'music.handover' | 'continuation.resumed' | 'navigation.handover' | 'overview.refreshed'
+export type CollaborationSyncEventType = 'contact.updated' | 'message.read' | 'message.created' | 'music.stateChanged' | 'music.handover' | 'continuation.resumed' | 'navigation.handover' | 'overview.refreshed' | 'device.online' | 'device.offline'
 
 export interface CollaborationSyncEvent {
   type: CollaborationSyncEventType;

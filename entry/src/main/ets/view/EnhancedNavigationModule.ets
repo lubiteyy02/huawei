@@ -7,6 +7,7 @@ import { webview } from '@kit.ArkWeb';
 import { MapService, Location, POIResult } from '../services/MapService';
 import { NavigationService, NavigationState, NavigationInfo } from '../services/NavigationService';
 import { VoiceGuideService } from '../services/VoiceGuideService';
+import { RealTtsService } from '../services/RealTtsService';
 import { FavoriteService } from '../services/FavoriteService';
 import { NavigationHistoryService } from '../services/NavigationHistoryService';
 import { AuthService } from '../services/AuthService';
@@ -51,6 +52,9 @@ export struct EnhancedNavigationModule {
   private mapService: MapService = MapService.getInstance();
   private navigationService: NavigationService = NavigationService.getInstance();
   private voiceService: VoiceGuideService = VoiceGuideService.getInstance();
+  // 真实 TTS：用于路径规划完成等场景的真发声播报
+  // （VoiceGuideService.speak 当前是 console-only 占位实现）
+  private realTts: RealTtsService = RealTtsService.getInstance();
   private favoriteService: FavoriteService = FavoriteService.getInstance();
   private historyService: NavigationHistoryService = NavigationHistoryService.getInstance();
   private authService: AuthService = AuthService.getInstance();
@@ -207,6 +211,11 @@ export struct EnhancedNavigationModule {
       if (destinationName) {
         await this.saveNavigationHistory(destination, destinationName);
       }
+      // 路径规划成功后语音播报：让驾驶员无需低头看屏即可获知规划已完成
+      const speakText = destinationName
+        ? `已为您规划路径，即将出发前往${destinationName}`
+        : '已为您规划路径，即将出发';
+      void this.realTts.speak(speakText);
     } catch (err) {
       console.error('Start navigation error:', err);
       await this.safeToast('导航启动失败，请重试');

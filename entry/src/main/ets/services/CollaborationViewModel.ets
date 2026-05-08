@@ -1,4 +1,4 @@
-import { CollaborationDataService, type CollaborationContact, type CollaborationMessageThread, type CollaborationMusicItem, type CollaborationContinuationTask } from './CollaborationDataService'
+import { CollaborationDataService, type CollaborationContact, type CollaborationMessageThread, type CollaborationMusicItem, type CollaborationContinuationTask, type ActiveDevice } from './CollaborationDataService'
 import type { CollaborationBackendConfig, MusicStateSnapshot } from './CollaborationApiService'
 import type { ContactBulkItem } from './RealContactsService'
 import { CollaborationSyncSocketService, type CollaborationSyncEvent, type CollaborationSyncEventListener } from './CollaborationSyncSocketService'
@@ -51,6 +51,10 @@ export class CollaborationViewModel {
 
   async loadOverview(): Promise<import('./CollaborationDataService').CollaborationOverview> {
     return this.service.getOverview()
+  }
+
+  async loadActiveDevices(): Promise<ActiveDevice[]> {
+    return this.service.getActiveDevices()
   }
 
   async syncMusic(songId: number, playing: boolean, position: number): Promise<boolean> {

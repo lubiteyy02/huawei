@@ -54,6 +54,13 @@ export interface CollaborationOverview {
   logs: string[];
 }
 
+export interface ActiveDevice {
+  deviceId: string;
+  role: string;     // 'phone' | 'car'
+  online: boolean;
+  lastSeen: string;
+}
+
 // 兜底默认值：后端无数据 / 离线时使用，全部为空，避免显示假数据
 const defaultOverview: CollaborationOverview = {
   phoneName: '',
@@ -124,6 +131,16 @@ export class CollaborationDataService {
       return this.readCached<T>(cacheKey, fallback)
     }
     return this.readCached<T>(cacheKey, fallback)
+  }
+
+  /**
+   * 在线设备列表：纯后端数据，不走缓存（实时性强、数据量小）。
+   * 后端没响应就返回空数组，调用方按 fallback 渲染「未连接」。
+   */
+  async getActiveDevices(): Promise<ActiveDevice[]> {
+    if (!this.useBackend) return []
+    const data = await this.apiService.getActiveDevices()
+    return data ?? []
   }
 
   async getOverview(): Promise<CollaborationOverview> {

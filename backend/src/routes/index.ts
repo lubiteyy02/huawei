@@ -82,6 +82,7 @@ router.get('/sync/music/state', collaborationController.getMusicState);
 router.post('/sync/music/handover', collaborationController.handoverMusic);
 router.post('/sync/navigation/handover', collaborationController.navigationHandover);
 router.post('/sync/log', collaborationController.addLog);
+router.get('/sync/devices', collaborationController.getActiveDevices);
 
 // ========== 多媒体资源相关路由 ==========
 router.get('/media/resources', mediaController.getMediaResources);

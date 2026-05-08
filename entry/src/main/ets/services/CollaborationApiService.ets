@@ -5,7 +5,8 @@ import type {
   CollaborationMessageThread,
   CollaborationMusicItem,
   CollaborationContinuationTask,
-  CollaborationOverview
+  CollaborationOverview,
+  ActiveDevice
 } from './CollaborationDataService'
 
 export interface CollaborationSyncPayload<T> {
@@ -171,6 +172,11 @@ export class CollaborationApiService {
 
   async getOverview(): Promise<CollaborationOverview | null> {
     const res = await this.requestJson<CollaborationSyncPayload<CollaborationOverview>>('/api/v1/sync/overview', http.RequestMethod.GET)
+    return res && res.code === 0 ? res.data : null
+  }
+
+  async getActiveDevices(): Promise<ActiveDevice[] | null> {
+    const res = await this.requestJson<CollaborationSyncPayload<ActiveDevice[]>>('/api/v1/sync/devices', http.RequestMethod.GET)
     return res && res.code === 0 ? res.data : null
   }
 

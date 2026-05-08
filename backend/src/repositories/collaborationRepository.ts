@@ -163,3 +163,47 @@ export async function recentLogs(limit: number): Promise<CollaborationSyncLogRec
   const safeLimit = Number(limit) || 10;
   return query<CollaborationSyncLogRecord[]>(`SELECT * FROM collaboration_sync_logs ORDER BY id DESC LIMIT ${safeLimit}`, []);
 }
+
+// ========== 在线设备 ==========
+export interface CollaborationActiveDeviceRecord {
+  deviceId: string;
+  userId: string;
+  role: string;
+  online: number;
+  lastSeen: string;
+}
+
+function inferRole(deviceId: string): string {
+  if (deviceId.startsWith('car-')) return 'car';
+  if (deviceId.startsWith('phone-')) return 'phone';
+  return 'phone';
+}
+
+export async function upsertActiveDevice(deviceId: string, userId: string): Promise<CollaborationActiveDeviceRecord> {
+  const role = inferRole(deviceId);
+  await query(
+    'INSERT INTO collaboration_active_devices (device_id, user_id, role, online, last_seen) VALUES (?, ?, ?, 1, NOW()) ' +
+    'ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), role = VALUES(role), online = 1, last_seen = NOW()',
+    [deviceId, userId, role]
+  );
+  const rows = await query<CollaborationActiveDeviceRecord[]>(
+    'SELECT device_id AS deviceId, user_id AS userId, role, online, last_seen AS lastSeen FROM collaboration_active_devices WHERE device_id = ?',
+    [deviceId]
+  );
+  return rows[0];
+}
+
+export async function markDeviceOffline(deviceId: string): Promise<void> {
+  await query(
+    'UPDATE collaboration_active_devices SET online = 0, last_seen = NOW() WHERE device_id = ?',
+    [deviceId]
+  );
+}
+
+export async function listActiveDevicesByUser(userId: string): Promise<CollaborationActiveDeviceRecord[]> {
+  return query<CollaborationActiveDeviceRecord[]>(
+    'SELECT device_id AS deviceId, user_id AS userId, role, online, last_seen AS lastSeen ' +
+    'FROM collaboration_active_devices WHERE user_id = ? ORDER BY role ASC',
+    [userId]
+  );
+}

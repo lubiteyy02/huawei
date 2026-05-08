@@ -3,6 +3,7 @@ import { deviceInfo } from '@kit.BasicServicesKit'
 import { CollaborationViewModel } from '../services/CollaborationViewModel'
 import { CollaborationBackendConfig } from '../services/CollaborationApiService'
 import type { CollaborationSyncEvent } from '../services/CollaborationSyncSocketService'
+import type { ActiveDevice } from '../services/CollaborationDataService'
 
 interface DeviceStatusCard {
   title: string;
@@ -35,6 +36,12 @@ export struct CollaborationModule {
   private readonly viewModel: CollaborationViewModel = CollaborationViewModel.getInstance();
   private readonly syncListener: (event: CollaborationSyncEvent) => void = (event: CollaborationSyncEvent): void => {
     this.syncHint = `${event.type} · ${event.timestamp}`;
+    // 设备上下线 → 重拉一次设备列表，反馈到 deviceCards
+    if (event.type === 'device.online' || event.type === 'device.offline') {
+      void this.refreshDevices();
+      this.logs = [`${event.type === 'device.online' ? '设备上线' : '设备下线'}：${event.payload.deviceId ?? '?'} · ${this.formatTimeText()}`, ...this.logs].slice(0, 8);
+      return;
+    }
     if (event.type === 'contact.updated') {
       const tag = typeof event.payload.tag === 'string' ? event.payload.tag : '';
       this.contactCount = this.contactCount;
@@ -69,9 +76,11 @@ export struct CollaborationModule {
     this.logs = [`总览已刷新 · ${this.formatTimeText()}`, ...this.logs].slice(0, 8);
   };
 
-  private readonly deviceCards: DeviceStatusCard[] = [
-    { title: '手机', value: '未连接', detail: '主设备' },
-    { title: '车机', value: '未连接', detail: '协同终端' },
+  // 设备状态卡片：不再是 readonly 静态数据，跟后端 collaboration_active_devices 表 + WebSocket device.online/device.offline 事件联动。
+  // 初始为「检测中」占位，aboutToAppear 会发 GET /sync/devices 装上真实状态。
+  @State deviceCards: DeviceStatusCard[] = [
+    { title: '手机', value: '检测中', detail: '主设备' },
+    { title: '车机', value: '检测中', detail: '协同终端' },
     { title: '状态', value: '连接中', detail: '等待同步' }
   ];
 
@@ -241,7 +250,47 @@ export struct CollaborationModule {
     void this.refreshMusic();
     void this.refreshMusicState();
     void this.refreshContinuation();
+    void this.refreshDevices();
     this.setLoadingState(false);
+  }
+
+  /**
+   * 拉后端 GET /sync/devices 同步 deviceCards。
+   * 手机、车机 从返回列表里查是否 online；总状态按两者是否都 online 决定。
+   * 本机设备额外在 detail 里加「本机」标记。
+   */
+  private async refreshDevices(): Promise<void> {
+    try {
+      const list: ActiveDevice[] = await this.viewModel.loadActiveDevices();
+      const phone = list.find((d) => d.role === 'phone');
+      const car = list.find((d) => d.role === 'car');
+      const phoneOnline = phone !== undefined && phone.online;
+      const carOnline = car !== undefined && car.online;
+      const phoneIsLocal = this.deviceRole === 'phone';
+      const carIsLocal = this.deviceRole === 'car';
+      const next: DeviceStatusCard[] = [
+        {
+          title: '手机',
+          value: phoneOnline ? '已连接' : '未连接',
+          detail: phoneIsLocal ? '主设备 · 本机' : '主设备'
+        },
+        {
+          title: '车机',
+          value: carOnline ? '已连接' : '未连接',
+          detail: carIsLocal ? '协同终端 · 本机' : '协同终端'
+        },
+        {
+          title: '状态',
+          value: (phoneOnline && carOnline) ? '已同步' : (phoneOnline || carOnline ? '单端在线' : '未连接'),
+          detail: (phoneOnline && carOnline) ? '两端均在线' : (phoneOnline || carOnline ? '等待对端' : '不能同步')
+        }
+      ];
+      this.deviceCards = next;
+      // 徽章对齐：两端都在线=已连接，否则连接中/离线
+      this.syncStatus = (phoneOnline && carOnline) ? '已连接' : (phoneOnline || carOnline ? '连接中' : '未连接');
+    } catch (e) {
+      console.error('[CollaborationModule] refreshDevices failed', JSON.stringify(e));
+    }
   }
 
   aboutToDisappear() {

@@ -16,7 +16,8 @@ import {
   replaceContacts,
   saveMusicStateRecord,
   saveOverviewRecord,
-  updateContactTagById
+  updateContactTagById,
+  listActiveDevicesByUser
 } from '../repositories/collaborationRepository';
 
 function mysqlDateTime(date: Date = new Date()): string {
@@ -357,4 +358,23 @@ export async function handoverMusic(req: Request, res: Response) {
     triggeredBy
   }, triggeredBy, req.header('X-User-Id') ?? undefined, 'music', ['music', 'overview', 'log']));
   res.json(wrap({ version: Date.now() }));
+}
+
+interface ActiveDeviceDto {
+  deviceId: string;
+  role: string;
+  online: boolean;
+  lastSeen: string;
+}
+
+export async function getActiveDevices(req: Request, res: Response) {
+  const userId = (req.header('X-User-Id') ?? req.query.userId as string ?? '10001').toString();
+  const rows = await listActiveDevicesByUser(userId);
+  const data: ActiveDeviceDto[] = rows.map((r) => ({
+    deviceId: r.deviceId,
+    role: r.role,
+    online: r.online === 1,
+    lastSeen: r.lastSeen
+  }));
+  res.json(wrap(data));
 }

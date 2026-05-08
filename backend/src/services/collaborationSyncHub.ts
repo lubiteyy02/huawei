@@ -1,6 +1,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
+import { upsertActiveDevice, markDeviceOffline } from '../repositories/collaborationRepository';
 
-export type CollaborationSyncEventType = 'contact.updated' | 'message.read' | 'message.created' | 'music.stateChanged' | 'music.handover' | 'continuation.resumed' | 'navigation.handover' | 'overview.refreshed';
+export type CollaborationSyncEventType = 'contact.updated' | 'message.read' | 'message.created' | 'music.stateChanged' | 'music.handover' | 'continuation.resumed' | 'navigation.handover' | 'overview.refreshed' | 'device.online' | 'device.offline';
 
 export interface CollaborationSyncEvent {
   type: CollaborationSyncEventType;
@@ -57,6 +58,19 @@ export function initializeCollaborationSyncHub(server: import('http').Server): v
         const deviceId = message.deviceId ?? 'unknown-device';
         subscribedClients.set(socket, { userId, deviceId });
         send(socket, { type: 'subscribed', userId, deviceId, timestamp: new Date().toISOString() });
+        // 设备上线：DB upsert + 广播给同 user 的其他在线设备
+        upsertActiveDevice(deviceId, userId)
+          .then((record) => {
+            broadcastEvent(createSyncEvent(
+              'device.online',
+              { deviceId, role: record.role, userId },
+              deviceId,
+              userId,
+              'overview',
+              ['overview']
+            ));
+          })
+          .catch((err) => console.error('[SyncHub] upsertActiveDevice failed', err));
         return;
       }
 
@@ -66,7 +80,22 @@ export function initializeCollaborationSyncHub(server: import('http').Server): v
     });
 
     socket.on('close', () => {
+      const info = subscribedClients.get(socket);
       subscribedClients.delete(socket);
+      if (!info) return;
+      // 设备下线：DB 标记 + 广播
+      markDeviceOffline(info.deviceId)
+        .then(() => {
+          broadcastEvent(createSyncEvent(
+            'device.offline',
+            { deviceId: info.deviceId, userId: info.userId },
+            info.deviceId,
+            info.userId,
+            'overview',
+            ['overview']
+          ));
+        })
+        .catch((err) => console.error('[SyncHub] markDeviceOffline failed', err));
     });
   });
 }

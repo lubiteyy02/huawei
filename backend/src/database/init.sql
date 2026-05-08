@@ -59,6 +59,7 @@ DROP TABLE IF EXISTS collaboration_music_library;
 DROP TABLE IF EXISTS collaboration_message_threads;
 DROP TABLE IF EXISTS collaboration_contacts;
 DROP TABLE IF EXISTS collaboration_overview;
+DROP TABLE IF EXISTS collaboration_active_devices;
 
 SET FOREIGN_KEY_CHECKS = 1;
 
@@ -126,6 +127,17 @@ CREATE TABLE collaboration_sync_logs (
   message_text VARCHAR(255) NOT NULL,
   source_label VARCHAR(64) NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 在线设备表：WebSocket subscribe 时 upsert 一条，断开时标记 offline。
+-- role 仅按 device_id 前缀推断（phone-* / car-*），用于前端区分本机/对端。
+CREATE TABLE collaboration_active_devices (
+  device_id VARCHAR(64) PRIMARY KEY,
+  user_id VARCHAR(64) NOT NULL,
+  role VARCHAR(16) NOT NULL DEFAULT 'phone',
+  online TINYINT(1) NOT NULL DEFAULT 1,
+  last_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_active_user (user_id, online)
 );
 
 -- 协同模块大部分表不写种子数据，由用户真实操作产生。
