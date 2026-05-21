@@ -9,7 +9,7 @@ import * as feedbackController from '../controllers/feedbackController';
 import * as frequentLocationController from '../controllers/frequentLocationController';
 import * as mediaController from '../controllers/mediaController';
 import * as collaborationController from '../controllers/collaborationController';
-
+import pressureRouter from './pressure';
 const router = express.Router();
 
 // ========== 认证相关路由（无需token） ==========
@@ -83,7 +83,8 @@ router.post('/sync/music/handover', collaborationController.handoverMusic);
 router.post('/sync/navigation/handover', collaborationController.navigationHandover);
 router.post('/sync/log', collaborationController.addLog);
 router.get('/sync/devices', collaborationController.getActiveDevices);
-
+// ========== 压测路由（仅测试用，定稿前删除） ==========
+router.use(pressureRouter);
 // ========== 多媒体资源相关路由 ==========
 router.get('/media/resources', mediaController.getMediaResources);
 

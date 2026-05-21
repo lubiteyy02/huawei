@@ -1,0 +1,62 @@
+@startuml fig3-3
+title 图 3-3  系统功能模块结构图
+
+skinparam monochrome true
+skinparam shadowing false
+skinparam linetype ortho
+skinparam defaultFontName SimSun
+skinparam defaultFontSize 11
+skinparam backgroundColor #FFFFFF
+skinparam rectangle {
+  RoundCorner 0
+}
+
+rectangle "车载信息娱乐系统" {
+
+  rectangle "用户认证模块" {
+    rectangle "注册" as A1
+    rectangle "登录" as A2
+    rectangle "令牌管理" as A3
+    rectangle "个人中心" as A4
+  }
+
+  rectangle "导航模块" {
+    rectangle "地图WebView" as N1
+    rectangle "POI检索" as N2
+    rectangle "路径规划" as N3
+    rectangle "收藏地点" as N4
+    rectangle "导航历史" as N5
+  }
+
+  rectangle "多媒体模块" {
+    rectangle "播放控制" as MD1
+    rectangle "歌词解析" as MD2
+    rectangle "卷帘渲染" as MD3
+    rectangle "曲目管理" as MD4
+  }
+
+  rectangle "车辆监控模块" {
+    rectangle "高频采样" as V1
+    rectangle "低频采样" as V2
+    rectangle "仪表盘渲染" as V3
+  }
+
+  rectangle "多设备协同模块" {
+    rectangle "设备发现" as C1
+    rectangle "协同联系人" as C2
+    rectangle "协同短信" as C3
+    rectangle "音乐续接" as C4
+    rectangle "导航续接" as C5
+    rectangle "同步日志" as C6
+  }
+
+  rectangle "全局服务模块" {
+    rectangle "GlobalAnnouncerService" as G1
+    rectangle "WebSocket客户端" as G2
+    rectangle "REST客户端" as G3
+    rectangle "AppStorage" as G4
+  }
+
+}
+
+@enduml

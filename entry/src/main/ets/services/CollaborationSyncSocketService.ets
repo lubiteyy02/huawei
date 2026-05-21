@@ -71,9 +71,18 @@ export class CollaborationSyncSocketService {
         if (!raw) {
           return
         }
-        try {
+                try {
           const envelope = JSON.parse(raw) as SyncEnvelope
           if (envelope.type === 'sync-event' && envelope.event) {
+            // === PERF TEST LOG ===
+            console.info('PERF_RECV ' + JSON.stringify({
+              side: 'recv',
+              ts: Date.now(),
+              type: envelope.event.type,
+              evtId: (envelope.event as object as Record<string, string>).eventId,
+              deviceId: this.deviceId
+            }))
+            // === END PERF TEST LOG ===
             this.emit(envelope.event)
           }
         } catch {

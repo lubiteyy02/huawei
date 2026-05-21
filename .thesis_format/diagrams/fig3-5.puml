@@ -1,0 +1,44 @@
+@startuml fig3-5
+title 图 3-5  全局交互路由引擎流程图
+
+skinparam monochrome true
+skinparam shadowing false
+skinparam linetype ortho
+skinparam defaultFontName SimSun
+skinparam defaultFontSize 11
+skinparam backgroundColor #FFFFFF
+
+start
+
+:驾驶员点击常驻悬浮按钮;
+:展开快捷菜单;
+:用户选择目标入口;
+:构造操作意图 intent;
+
+:GlobalAnnouncerService分发;
+
+if (目标为当前Tab?) then (是)
+  :触发动画反馈;
+  :菜单自动收起;
+else (否)
+  :切换至目标Tab;
+  :保留各Tab本地状态;
+endif
+
+if (收到协同推送?) then (是)
+  :覆盖层呈现待确认卡片;
+  :超时自动收起;
+else (否)
+endif
+
+:更新ViewModel状态;
+:触发UI增量重渲;
+
+if (需要跨端同步?) then (是)
+  :经SyncHub广播至其他设备;
+else (否)
+endif
+
+stop
+
+@enduml

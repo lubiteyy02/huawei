@@ -16,3 +16,21 @@ backend/dist
 backend/node_modules
 /sdk/
 /Sdk/
+
+# 论文格式目录中的大二进制文件（解压后的docx、字体、图片、zip包）
+.thesis_format/verify/
+.thesis_format/verify2/
+.thesis_format/verify3/
+.thesis_format/thesis/
+.thesis_format/thesis_revised/
+.thesis_format/thesis_revised2/
+.thesis_format/thesis_revised3/
+.thesis_format/guide/
+.thesis_format/norm/
+.thesis_format/*.zip
+.thesis_format/*.docx
+
+# 日志文件
+hilog_all.log
+hub.log
+recv.log

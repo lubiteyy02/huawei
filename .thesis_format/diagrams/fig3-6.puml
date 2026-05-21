@@ -1,0 +1,46 @@
+@startuml fig3-6
+title 图 3-6  跨端协同同步时序图
+
+skinparam monochrome true
+skinparam shadowing false
+skinparam defaultFontName SimSun
+skinparam defaultFontSize 11
+skinparam backgroundColor #FFFFFF
+skinparam responseMessageBelowArrow true
+
+actor "用户" as U
+participant "手机端" as Phone
+participant "SyncHub" as Hub
+database "MySQL" as DB
+participant "车机端" as Car
+
+== 设备上线 ==
+Phone -> Hub : connect + subscribe
+Hub -> DB : 写入在线设备表
+Hub -> Car : broadcast device.online
+Car -> Hub : connect + subscribe
+Hub -> DB : 写入在线设备表
+Hub -> Phone : broadcast device.online
+
+== 续接发起 ==
+U -> Phone : 点击续接到车机
+Phone -> Hub : POST handover请求
+
+== 持久化与广播 ==
+Hub -> DB : 写入续接任务表
+Hub -> Car : 转发handover事件
+
+== 车机端确认 ==
+Car -> Car : 显示待确认卡片
+Car -> Car : 驾驶员确认续接
+
+== 续接执行 ==
+Car -> Car : 加载并播放媒体
+
+== 状态回流 ==
+Car -> Hub : POST 状态更新
+Hub -> DB : 更新播放状态
+Hub -> Phone : 转发状态变更
+Phone -> Phone : 暂停播放
+
+@enduml

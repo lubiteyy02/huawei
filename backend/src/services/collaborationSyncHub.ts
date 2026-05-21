@@ -101,6 +101,16 @@ export function initializeCollaborationSyncHub(server: import('http').Server): v
 }
 
 export function broadcastEvent(event: CollaborationSyncEvent): void {
+  // === PERF TEST LOG (论文测试章用，定稿前删除) ===
+  console.log('PERF_HUB ' + JSON.stringify({
+    side: 'hub',
+    ts: Date.now(),
+    type: event.type,
+    src: (event as any).sourceDeviceId,
+    evtId: (event as any).eventId
+  }));
+  // === END PERF TEST LOG ===
+
   const payload = {
     type: 'sync-event',
     event
